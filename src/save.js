@@ -2,7 +2,9 @@
 import { SAVE_VERSION } from './config.js';
 import { World } from './world/world.js';
 
-const DB = 'minefactory', STORE = 'saves', KEY = 'slot1';
+const DB = 'minefactory', STORE = 'saves';
+// 주소에 ?slot=이름 을 붙이면 다른 저장 칸을 쓴다 (테스트할 때 실제 저장을 덮어쓰지 않도록)
+const KEY = new URLSearchParams(location.search).get('slot') || 'slot1';
 
 function open() {
   return new Promise((res, rej) => {
@@ -37,11 +39,12 @@ export function serialize(game) {
 export function restoreWorld(data) {
   const w = new World(data.seed);
   for (let l = 0; l < 2; l++) {
-    for (const k of ['ground', 'obj', 'meta', 'seen']) w.layers[l][k].set(data.layers[l][k]);
+    for (const k of ['ground', 'obj', 'meta', 'seen', 'roof']) if (data.layers[l][k]) w.layers[l][k].set(data.layers[l][k]);
     w.ents[l] = new Map(data.ents[l]);
     w.grow[l] = new Map(data.grow[l]);
   }
   w.entrances = data.entrances; w.spawn = data.spawn;
+  w.rescan();
   return w;
 }
 

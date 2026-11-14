@@ -10,7 +10,9 @@ html, body {
   font-family: var(--font); font-size: 14px; line-height: 1.45;
   user-select: none; -webkit-user-select: none; -webkit-font-smoothing: none;
 }
-#game { position: fixed; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair; }
+#game { position: fixed; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair;
+  -webkit-user-drag: none; -webkit-touch-callout: none; touch-action: none; }
+#ui, #ui * { -webkit-user-drag: none; }
 #ui { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
 .hidden { display: none !important; }
 button { font-family: var(--font); }
@@ -103,6 +105,11 @@ button { font-family: var(--font); }
 .flame i { position: absolute; left: 0; top: 0; bottom: 0; background: #f0642a; }
 .invtitle { font-size: 11px; color: var(--dim); margin: 0 0 4px; }
 .gap { height: 8px; }
+.swatches { display: grid; grid-template-columns: repeat(4, var(--slot)); gap: 6px; }
+.sw { width: var(--slot); height: var(--slot); border: 3px solid var(--edge); cursor: pointer; padding: 0;
+  box-shadow: inset 3px 3px 0 rgba(255, 255, 255, 0.3), inset -3px -3px 0 rgba(0, 0, 0, 0.25); }
+.sw:hover { transform: translateY(-2px); }
+.sw.on { outline: 3px solid var(--ink); outline-offset: 1px; }
 
 #held { position: fixed; width: 34px; height: 34px; pointer-events: none; z-index: 50; transform: translate(-50%, -50%); }
 #held .ico { position: absolute; inset: 0; background: center / contain no-repeat; image-rendering: pixelated; }

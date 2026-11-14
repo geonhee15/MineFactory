@@ -10,3 +10,4 @@ export const INV_SIZE = 36;        // 0~8 단축바, 9~35 가방
 export const HOTBAR = 9;
 export const SAVE_VERSION = 1;
 export const WALL_LIFT = 6;        // 벽 블록이 위로 솟아 보이는 높이(px)
+export const ROOF_LIFT = 12;       // 지붕이 떠 보이는 높이(px) — 남쪽 벽과 문이 지붕 아래로 보이도록 벽보다 높다

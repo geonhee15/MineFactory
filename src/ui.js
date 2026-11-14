@@ -1,7 +1,8 @@
 // DOM 기반 UI: HUD, 단축바, 가방·제작·화로·상자 창, 지도, 타이틀·일시정지 메뉴
 import { MAP_W, MAP_H, TILE, CAVE, HOTBAR } from './config.js';
 import { GROUND } from './data/ground.js';
-import { OBJ } from './data/objects.js';
+import { OBJ, FLAG_COLORS } from './data/objects.js';
+import { hex } from './gfx/pix.js';
 import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES } from './data/items.js';
 import { maxStack } from './inventory.js';
 import { QUESTS } from './quests.js';
@@ -14,6 +15,8 @@ const el = (tag, cls, html) => {
   return e;
 };
 const MINI = 78;
+const ROOF_COLOR = 0xa8503a;
+const flagHex = (m) => hex(FLAG_COLORS[m % FLAG_COLORS.length].c);
 
 export class UI {
   constructor(root, atlas, audio) {
@@ -56,7 +59,7 @@ export class UI {
         <div class="panel center">
           <div class="title-bar"><h2 id="maptitle">지도</h2><button class="x" data-act="map">✕</button></div>
           <canvas width="${MAP_W}" height="${MAP_H}"></canvas>
-          <div class="legend"><span><i style="background:#fff"></i>나</span><span><i style="background:#f4c430"></i>동굴 입구 · 사다리</span><span><i style="background:#0e0c14;outline:1px solid #555d7b"></i>아직 가 보지 않은 곳</span></div>
+          <div class="legend"><span><i style="background:#fff"></i>나</span><span><i style="background:#f4c430"></i>동굴 입구 · 사다리</span><span><i style="background:#e2504a"></i>내가 세운 깃발</span><span><i style="background:#0e0c14;outline:1px solid #555d7b"></i>아직 가 보지 않은 곳</span></div>
         </div>
       </div>
       <div id="title" class="screen">
@@ -261,6 +264,7 @@ export class UI {
     if (this.titleOpen || this.pauseOpen || this.mapOpen) return;
     if (this.mode) this.close(true);
     this.mode = mode; this.ent = ent || null;
+    if (mode === 'flag') return this.openFlag(ent);
     const win = (this.win = el('div')); win.id = 'window';
     const left = el('div', 'panel side'), right = el('div', 'panel');
     const names = { inventory: '제작', workbench: '제작대', furnace: '화로', chest: '상자' };
@@ -316,6 +320,29 @@ export class UI {
     this.dirty = true;
     this.audio.play('open');
   }
+  openFlag(pos) {
+    const g = this.game, cur = g.world.meta(pos.l, pos.x, pos.y);
+    const win = (this.win = el('div')); win.id = 'window';
+    const panel = el('div', 'panel');
+    const bar = el('div', 'title-bar', '<h2>깃발 색 고르기</h2>');
+    const x = el('button', 'x', '✕'); x.addEventListener('click', () => this.close()); bar.append(x);
+    const box = el('div', 'swatches');
+    FLAG_COLORS.forEach((fc, k) => {
+      const b = el('button', 'sw' + (k === cur ? ' on' : ''));
+      b.style.background = hex(fc.c); b.title = fc.name;
+      b.addEventListener('click', () => {
+        g.world.setMeta(pos.l, pos.x, pos.y, k);
+        this.close(true);
+        this.audio.play('craft');
+        this.toast(`${fc.name} 깃발을 세웠어요. 지도에 표시됩니다`, 'good');
+      });
+      box.append(b);
+    });
+    panel.append(bar, box, el('div', 'note', '고른 색의 깃발이 미니맵과 지도(M)에 표시돼요.<br>멀어지면 미니맵 가장자리의 화살표가 방향을 알려 줍니다.'));
+    win.append(panel);
+    this.root.insertBefore(win, this.heldEl);
+    this.audio.play('open');
+  }
   close(silent) {
     if (!this.mode) return;
     if (this.held) {
@@ -338,6 +365,7 @@ export class UI {
     if (it.food) x += `<div class="tx ok">포만감 +${it.food}</div>`;
     if (it.fuel) x += `<div class="tx">연료 ${it.fuel}초</div>`;
     if (it.tool) x += `<div class="tx">${['', '나무', '돌', '철'][it.tier]} 등급 도구</div>`;
+    if (it.roof) x += '<div class="tx">들고 있으면 지붕이 비쳐 보여요.<br>빈 곳 클릭: 덮기 · 지붕 클릭: 걷어 내기 (끌어서 연속)</div>';
     if (it.place || it.seed) x += `<div class="tx">단축바에서 고르고 클릭하면 ${it.seed ? '심을' : '놓을'} 수 있어요</div>`;
     return `<div class="tn">${it.name}</div><div class="td">${it.desc}</div>${x}`;
   }
@@ -460,7 +488,7 @@ export class UI {
     const w = this.game.world, Lr = w.layers[l], d = this.mapImg[l].data;
     for (let i = 0; i < N; i++) {
       let c = 0x0e0c14;
-      if (Lr.seen[i]) { const o = Lr.obj[i]; c = o && OBJ[o].map >= 0 ? OBJ[o].map : GROUND[Lr.ground[i]].color; }
+      if (Lr.seen[i]) { const o = Lr.obj[i]; c = Lr.roof[i] ? ROOF_COLOR : o && OBJ[o].map >= 0 ? OBJ[o].map : GROUND[Lr.ground[i]].color; }
       const j = i * 4;
       d[j] = (c >> 16) & 255; d[j + 1] = (c >> 8) & 255; d[j + 2] = c & 255; d[j + 3] = 255;
     }
@@ -494,8 +522,41 @@ export class UI {
       if (m > half - 3) { const k = (half - 3) / m; dx *= k; dy *= k; }
       if (blink) { c.fillStyle = '#241a2b'; c.fillRect(half + dx - 3, half + dy - 3, 7, 7); c.fillStyle = '#ffe27a'; c.fillRect(half + dx - 2, half + dy - 2, 5, 5); }
     }
+    // 깃발: 범위 안이면 깃발 아이콘, 멀리 있으면 가장자리에 그 색 화살표 (가까운 순으로 8개까지)
+    const meta = g.world.layers[L].meta, far = [];
+    for (const i of g.world.flags[L]) {
+      const dx = (i % MAP_W) - px, dy = ((i / MAP_W) | 0) - py;
+      if (Math.abs(dx) <= half - 6 && dy >= -(half - 9) && dy <= half - 2) this.flagIcon(c, half + dx, half + dy, flagHex(meta[i]));
+      else far.push([dx * dx + dy * dy, dx, dy, meta[i]]);
+    }
+    far.sort((a, b) => a[0] - b[0]);
+    for (const [, dx, dy, m] of far.slice(0, 8)) {
+      const k = (half - 7) / Math.max(Math.abs(dx), Math.abs(dy));
+      this.arrowIcon(c, Math.round(half + dx * k), Math.round(half + dy * k), Math.atan2(dy, dx), flagHex(m));
+    }
     c.fillStyle = '#241a2b'; c.fillRect(half - 2, half - 2, 5, 5);
     c.fillStyle = '#ffffff'; c.fillRect(half - 1, half - 1, 3, 3);
+  }
+  // 지도용 깃발 (x, y = 깃대가 꽂힌 칸)
+  flagIcon(c, x, y, color) {
+    c.fillStyle = '#241a2b'; c.fillRect(x - 1, y - 8, 3, 10); c.fillRect(x, y - 9, 8, 7);
+    c.fillStyle = '#f0f0f5'; c.fillRect(x, y - 7, 1, 8);
+    c.fillStyle = color; c.fillRect(x + 1, y - 8, 6, 5);
+    c.fillStyle = 'rgba(255,255,255,0.35)'; c.fillRect(x + 1, y - 8, 6, 1);
+  }
+  // 깃발 쪽을 가리키는 작은 화살표 (도트가 뭉개지지 않게 픽셀 단위로 찍는다)
+  arrowIcon(c, cx, cy, ang, color) {
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    for (let pass = 0; pass < 2; pass++) {
+      c.fillStyle = pass ? color : '#241a2b';
+      const gr = pass ? 0 : 1.1;
+      for (let y = -7; y <= 7; y++) for (let x = -7; x <= 7; x++) {
+        const al = x * dx + y * dy, pe = Math.abs(y * dx - x * dy);
+        const head = al >= 0.5 - gr && al <= 4.5 + gr && pe <= (4.5 - al) * 0.8 + gr;   // 화살촉
+        const shaft = al >= -4 - gr && al < 0.5 && pe <= 0.75 + gr;                     // 자루
+        if (head || shaft) c.fillRect(cx + x, cy + y, 1, 1);
+      }
+    }
   }
   drawBig() {
     const g = this.game, c = this.bigCtx, L = g.layer;
@@ -506,6 +567,8 @@ export class UI {
       if (!seen[e.y * MAP_W + e.x]) continue;
       c.fillStyle = '#241a2b'; c.fillRect(e.x - 3, e.y - 3, 7, 7); c.fillStyle = '#f4c430'; c.fillRect(e.x - 2, e.y - 2, 5, 5);
     }
+    const meta = g.world.layers[L].meta;
+    for (const i of g.world.flags[L]) this.flagIcon(c, i % MAP_W, (i / MAP_W) | 0, flagHex(meta[i]));
     const px = Math.floor(g.player.x / TILE), py = Math.floor(g.player.y / TILE);
     const b = ((performance.now() / 300) | 0) % 2;
     c.fillStyle = '#241a2b'; c.fillRect(px - 4, py - 4, 9, 9);

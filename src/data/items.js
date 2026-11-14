@@ -58,6 +58,8 @@ item('stone_brick', '돌 벽돌', '단단한 건축용 벽.', { place: { obj: O.
 item('plank_floor', '나무 바닥', '바닥에 깐다.', { place: { ground: G.PLANK } });
 item('door', '문', '우클릭으로 여닫는다.', { place: { obj: O.DOOR } });
 item('bed', '침대', '밤에 우클릭하면 아침까지 잔다.', { place: { obj: O.BED } });
+item('roof', '지붕', '벽과 방 위를 덮는 천장. 밖에서는 안이 보이지 않고, 문을 열거나 안에 들어가면 비쳐 보인다.', { roof: true });
+item('flag', '깃발', '세우고 색을 고르면 지도에 깃발로 표시된다. 멀리서도 화살표로 방향을 알려 준다.', { place: { obj: O.FLAG } });
 
 // ── 도구 ──
 const TIERS = [['wood', '나무', 1], ['stone', '돌', 2], ['iron', '철', 3]];
@@ -78,6 +80,7 @@ R('stick', 4, { plank: 2 });
 R('workbench', 1, { plank: 4 });
 R('torch', 4, { stick: 1, coal: 1 });
 R('torch', 4, { stick: 1, charcoal: 1 });
+R('flag', 1, { stick: 2, fiber: 3 });
 
 R('wood_pickaxe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
 R('wood_axe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
@@ -95,6 +98,7 @@ R('wood_wall', 2, { plank: 2 }, 'workbench', 'build');
 R('plank_floor', 4, { plank: 2 }, 'workbench', 'build');
 R('stone_brick', 2, { stone: 2 }, 'workbench', 'build');
 R('door', 1, { plank: 6 }, 'workbench', 'build');
+R('roof', 4, { plank: 2 }, 'workbench', 'build');
 R('bed', 1, { plank: 6, fiber: 8 }, 'workbench', 'build');
 
 R('bread', 1, { wheat: 3 }, 'workbench', 'food');

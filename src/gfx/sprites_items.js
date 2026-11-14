@@ -358,6 +358,18 @@ export function buildItemSprites(atlas, { texs }) {
     I('bed', p.outline(K));
   }
 
+  I('roof', blockIcon(texs.roof, 2));
+  { // 깃발
+    const p = new Pix(16, 16), c = 0xe2504a;
+    for (let cx = 0; cx < 9; cx++) {
+      const yo = Math.round(Math.sin((cx / 8) * Math.PI * 1.5) * 1);
+      for (let cy = 0; cy < 6; cy++) p.set(6 + cx, 3 + cy + yo, cy === 5 ? shade(c, 0.72) : cx < 3 ? shade(c, 1.2) : cx > 6 ? shade(c, 0.85) : c);
+    }
+    for (let y = 2; y < 15; y++) { p.set(4, y, 0xf0f0f5); p.set(5, y, 0x9aa0aa); }
+    p.set(4, 1, 0xfff1a0); p.set(5, 1, 0xf2c53d);
+    I('flag', p.outline(K));
+  }
+
   // 도구
   for (const mat of ['wood', 'stone', 'iron']) {
     const [m, M] = HEADS[mat], pal = { k: K, m, M, w: 0x96693f, W: 0x5a3d26 };

@@ -1,5 +1,5 @@
 // 월드 렌더러: 지형 → (행 단위 y정렬) 오브젝트·플레이어 → 조명 → 커서
-import { TILE, MAP_W, MAP_H, CAVE, WALL_LIFT } from '../config.js';
+import { TILE, MAP_W, MAP_H, CAVE, WALL_LIFT, ROOF_LIFT } from '../config.js';
 import { GROUND } from '../data/ground.js';
 import { OBJ, O } from '../data/objects.js';
 import { ITEMS } from '../data/items.js';
@@ -16,7 +16,7 @@ export class Renderer {
     this.zoom = 3; this.userZoom = 0;
     this.cam = { x: 0, y: 0 };
     this.ox = 0; this.oy = 0;
-    this.t = 0;
+    this.t = 0; this.frame = 0;
     this.light = document.createElement('canvas');
     this.lctx = this.light.getContext('2d');
     this.css = new Map();
@@ -51,13 +51,19 @@ export class Renderer {
     this.os = [];
     for (const d of OBJ) {
       if (!d || !d.spr) continue;
-      const b = { late: d.solid && !d.wall };
-      if (d.frames) { b.anim = []; for (let f = 0; f < d.frames; f++) b.anim.push(get(`${d.spr}_0_${f}`)); }
+      const b = { late: (d.solid || d.tall) && !d.wall };
+      if (d.frames && d.byMeta) {
+        b.mf = [];
+        for (let m = 0; m < d.byMeta; m++) { const fr = []; for (let f = 0; f < d.frames; f++) fr.push(get(`${d.spr}_${m}_${f}`)); b.mf.push(fr); }
+      }
+      else if (d.frames) { b.anim = []; for (let f = 0; f < d.frames; f++) b.anim.push(get(`${d.spr}_0_${f}`)); }
       else if (d.byMeta) { b.metas = []; for (let m = 0; m < d.byMeta; m++) b.metas.push(get(`${d.spr}_${m}`)); }
       else { b.vars = []; for (let v = 0; v < d.n; v++) b.vars.push(get(`${d.spr}_${v}`)); }
       this.os[d.id] = b;
     }
     this.furnB = get('o_furnace_1b');
+    this.roofSpr = [get('r_roof_0'), get('r_roof_1')];
+    this.roofRim = { N: get('r_rim_N'), W: get('r_rim_W'), E: get('r_rim_E'), S: get('r_rim_S') };
     this.dark = [get('w_dark_0'), get('w_dark_1')];
     this.rim = { N: get('rim_N'), W: get('rim_W'), E: get('rim_E') };
     this.shadowS = get('shadow_S');
@@ -100,6 +106,7 @@ export class Renderer {
   objSprite(def, meta, x, y) {
     const b = this.os[def.id];
     if (!b) return null;
+    if (b.mf) return b.mf[Math.min(meta, b.mf.length - 1)][((this.t * 5 + x * 3 + y) | 0) % b.mf[0].length];
     if (b.anim) return b.anim[((this.t * 8 + x * 3 + y) | 0) % b.anim.length];
     if (b.metas) {
       if (def.id === O.FURNACE && meta === 1 && ((this.t * 7) | 0) % 2) return this.furnB;
@@ -110,7 +117,7 @@ export class Renderer {
   col(c) { let s = this.css.get(c); if (!s) { s = hex(c); this.css.set(c, s); } return s; }
 
   render(game, dt) {
-    this.t += dt;
+    this.t += dt; this.frame++;
     const ctx = this.ctx, img = this.img, w = game.world, vw = this.vw, vh = this.vh;
     if (!w) { ctx.fillStyle = '#0b0910'; ctx.fillRect(0, 0, vw, vh); return; }
     const L = game.layer, Lr = w.layers[L], ground = Lr.ground, objs = Lr.obj, metas = Lr.meta;
@@ -167,6 +174,7 @@ export class Renderer {
     ents.sort((a, b) => a.y - b.y);
     let ei = 0;
     const mn = game.mining, sh = game.shake;
+    const roofs = Lr.roof, hasRoof = w.roofs[L].size > 0;
     const isWall = (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || OBJ[objs[y * MAP_W + x]].wall;
     const yEnd = Math.min(MAP_H - 1, y1 + 3), xs = Math.max(0, x0 - 1), xe = Math.min(MAP_W - 1, x1 + 1);
     for (let y = y0; y <= yEnd; y++) {
@@ -186,7 +194,7 @@ export class Renderer {
             if (!isWall(x, y - 1)) D(this.rim.N, px, py - WALL_LIFT);
             if (!isWall(x - 1, y)) D(this.rim.W, px, py - WALL_LIFT);
             if (!isWall(x + 1, y)) D(this.rim.E, px, py - WALL_LIFT);
-            if (mn && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py - WALL_LIFT);
+            if (mn && !mn.roof && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py - WALL_LIFT);
             continue;
           }
           const s = this.objSprite(def, metas[i], x, y);
@@ -199,12 +207,35 @@ export class Renderer {
           if (fade) ctx.globalAlpha = 0.45;
           D(s, px + s.ox, py + s.oy);
           if (fade) ctx.globalAlpha = 1;
-          if (mn && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py);
+          if (mn && !mn.roof && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py);
         }
         if (pass === 0) {
           const limit = (y + 1) * TILE - 2;
           while (ei < ents.length && ents[ei].y < limit) this.drawEnt(ents[ei++], game, D, ox, oy);
         }
+      }
+      if (hasRoof) {
+        for (let x = xs; x <= xe; x++) {
+          const i = y * MAP_W + x;
+          if (!roofs[i]) continue;
+          const reg = w.regionAt(L, i);
+          if (!reg) continue;
+          if (reg.af !== this.frame) {      // 덩어리마다 한 프레임에 한 번, 투명도를 부드럽게 바꾼다
+            reg.af = this.frame;
+            const target = title ? 1 : game.roofEdit ? 0.62 : game.roofOpen(reg) ? 0.1 : 1;
+            reg.alpha = reg.alpha < 0 ? target : reg.alpha + (target - reg.alpha) * Math.min(1, dt * 9);
+            if (Math.abs(target - reg.alpha) < 0.01) reg.alpha = target;
+          }
+          const px = x * TILE - ox;
+          ctx.globalAlpha = reg.alpha;
+          D(this.roofSpr[this.varr[i] & 1], px, py - ROOF_LIFT);
+          if (y === 0 || !roofs[i - MAP_W]) D(this.roofRim.N, px, py - ROOF_LIFT);
+          if (x === 0 || !roofs[i - 1]) D(this.roofRim.W, px, py - ROOF_LIFT);
+          if (x === MAP_W - 1 || !roofs[i + 1]) D(this.roofRim.E, px + 15, py - ROOF_LIFT);
+          if (y === MAP_H - 1 || !roofs[i + MAP_W]) D(this.roofRim.S, px, py + TILE - ROOF_LIFT);
+          if (mn && mn.roof && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py - ROOF_LIFT);
+        }
+        ctx.globalAlpha = 1;
       }
     }
     while (ei < ents.length) this.drawEnt(ents[ei++], game, D, ox, oy);
@@ -307,9 +338,13 @@ export class Renderer {
     if (!c || !w.inb(c.x, c.y)) return;
     const o = w.obj(L, c.x, c.y), def = OBJ[o], held = game.heldDef();
     let x = c.x * TILE - ox, y = c.y * TILE - oy, h = TILE;
-    if (def.wall) { y -= WALL_LIFT; h += WALL_LIFT; }
+    if (c.roof) {
+      y -= ROOF_LIFT;
+      if (c.inReach && game.roofEdit && !w.roof(L, c.x, c.y)) { ctx.globalAlpha = 0.5; D(this.roofSpr[0], x, y); ctx.globalAlpha = 1; }
+    }
+    else if (def.wall) { y -= WALL_LIFT; h += WALL_LIFT; }
     // 설치 미리보기
-    if (c.inReach && o === O.NONE && held && held.place && held.place.obj) {
+    if (!c.roof && c.inReach && o === O.NONE && held && held.place && held.place.obj) {
       const pd = OBJ[held.place.obj], s = this.objSprite(pd, held.place.meta || 0, c.x, c.y) || null;
       if (s) { ctx.globalAlpha = 0.5; D(s, x + s.ox, y + s.oy - (pd.wall ? 0 : 0)); ctx.globalAlpha = 1; }
     }

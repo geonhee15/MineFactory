@@ -1,5 +1,5 @@
 // 게임 상태와 규칙: 이동, 채굴, 설치, 농사, 화로, 동굴 이동
-import { TILE, MAP_W, MAP_H, SURFACE, CAVE, DAY_LENGTH, REACH, INV_SIZE, HOTBAR, WALL_LIFT } from './config.js';
+import { TILE, MAP_W, MAP_H, SURFACE, CAVE, DAY_LENGTH, REACH, INV_SIZE, HOTBAR, WALL_LIFT, ROOF_LIFT } from './config.js';
 import { G, GROUND } from './data/ground.js';
 import { O, OBJ, SAPLING_TREES } from './data/objects.js';
 import { ITEMS, TOOL_SPEED, SMELT } from './data/items.js';
@@ -14,8 +14,10 @@ const randi = (a, b) => Math.floor(rand(a, b + 1));
 const DIRS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
 const USE_TEXT = {
   workbench: '제작대 사용', furnace: '화로 열기', chest: '상자 열기', cave: '동굴로 들어가기',
-  ladder: '지상으로 올라가기', door: '문 여닫기', bed: '잠자기',
+  ladder: '지상으로 올라가기', door: '문 여닫기', bed: '잠자기', flag: '깃발 색 바꾸기',
 };
+// 지붕은 타일 오브젝트가 아니라 별도 층이라, 캘 때 쓰는 정의를 따로 둔다
+const ROOF_DEF = { name: '지붕', canBreak: true, wall: false, tool: 'axe', tier: 0, hard: 0.7, mat: 'wood', pcol: [0xa8503a, 0xc4664a, 0x86392c] };
 
 export class Game {
   constructor({ audio, input, ui }) {
@@ -41,6 +43,9 @@ export class Game {
     this.target = { x: 0, y: 0, inReach: false };
     this.targetDirect = this.target;
     this.cursor = this.target;
+    this.roofT = null;          // 마우스가 가리키는 지붕 높이의 칸
+    this.roofMode = 'place';
+    this.frameNo = 0;
     this.cool = 0;
     this.lastAct = -1;
     this.fade = null;           // { t, dur, phase, cb }
@@ -100,6 +105,7 @@ export class Game {
   // ─────────────────────────────────────────────────────────
   update(dt) {
     if (this.state !== 'play') return;
+    this.frameNo++;
     if (this.fade) this.updateFade(dt);
     if (this.paused) return;
     this.time += dt;
@@ -167,6 +173,53 @@ export class Game {
     p.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'r' : 'l') : dy > 0 ? 'd' : 'u';
   }
 
+  // ── 지붕 ──
+  // 지붕 아이템을 들고 있는 동안은 '지붕 편집' 상태: 지붕이 비쳐 보이고 클릭으로 덮거나 걷는다
+  get roofEdit() { const h = this.heldDef(); return !!(h && h.roof); }
+  // 이어진 지붕 덩어리가 열려(투명해져) 있는가: 플레이어가 그 아래에 있거나, 딸린 문이 열려 있을 때
+  roofOpen(reg) {
+    if (reg.frame === this.frameNo) return reg.open;
+    reg.frame = this.frameNo;
+    const Lr = this.world.layers[this.layer], obj = Lr.obj, meta = Lr.meta, p = this.player;
+    const pi = Math.floor(p.y / TILE) * MAP_W + Math.floor(p.x / TILE);
+    const openDoor = (j) => obj[j] === O.DOOR && meta[j] === 1;
+    let open = false;
+    for (const i of reg.tiles) {
+      if (i === pi || openDoor(i) || openDoor(i - 1) || openDoor(i + 1) || openDoor(i - MAP_W) || openDoor(i + MAP_W)) { open = true; break; }
+    }
+    return (reg.open = open);
+  }
+  // 이 칸의 지붕이 아래를 가리고 있는가
+  roofBlocks(x, y) {
+    const w = this.world;
+    if (!w.roof(this.layer, x, y)) return false;
+    const reg = w.regionAt(this.layer, w.idx(x, y));
+    return !!reg && !this.roofOpen(reg);
+  }
+  removeRoof(x, y, toInv) {
+    const w = this.world, cx = x * TILE + 8, cy = y * TILE + 2;
+    w.setRoof(this.layer, x, y, 0);
+    const left = toInv ? this.inv.add('roof', 1) : 1;
+    if (left > 0) this.spawnDrop('roof', left, cx, cy);
+    this.audio.play(toInv ? 'place' : 'break_wood');
+    this.burst(cx, cy, ROOF_DEF.pcol, toInv ? 4 : 9, 55);
+  }
+  // 지붕 편집: 누른 첫 칸에 지붕이 있으면 '걷기', 없으면 '덮기'로 정해져 끌어서 칠할 수 있다
+  roofPaint(t, hit) {
+    const w = this.world, L = this.layer, i = w.idx(t.x, t.y), has = !!w.roof(L, t.x, t.y);
+    this.mining = null;
+    if (hit) this.roofMode = has ? 'remove' : 'place';
+    if (!hit && (this.lastAct === i || this.cool > 0)) return;
+    if (this.roofMode === 'place' && !has) {
+      w.setRoof(L, t.x, t.y, 1);
+      this.inv.take(this.hotbar, 1);
+      this.audio.play('place');
+      this.stats.placed.roof = (this.stats.placed.roof || 0) + 1;
+    } else if (this.roofMode === 'remove' && has) this.removeRoof(t.x, t.y, true);
+    else return;
+    this.lastAct = i; this.cool = 0.07; this.player.swing = 0.14; this.faceTo(t);
+  }
+
   // ── 조준 ──
   reach(tx, ty) {
     const p = this.player;
@@ -177,6 +230,8 @@ export class Game {
     const pt = this.renderer.screenToWorld(m.x, m.y);
     const tx = Math.floor(pt.x / TILE), ty = Math.floor(pt.y / TILE);
     const direct = { x: tx, y: ty, inReach: this.reach(tx, ty) };
+    const ry = Math.floor((pt.y + ROOF_LIFT) / TILE);            // 지붕은 화면에서 위로 떠 있다
+    const roof = { x: tx, y: ry, inReach: this.reach(tx, ry) };
     let sx = tx, sy = ty;
     if (w.obj(L, tx, ty) === O.NONE) {
       if (w.inb(tx, ty + 1) && OBJ[w.obj(L, tx, ty + 1)].wall && pt.y - ty * TILE >= TILE - WALL_LIFT) sy = ty + 1;  // 벽의 솟은 윗면
@@ -192,7 +247,7 @@ export class Game {
         }
       }
     }
-    return { direct, smart: { x: sx, y: sy, inReach: this.reach(sx, sy) } };
+    return { direct, roof, smart: { x: sx, y: sy, inReach: this.reach(sx, sy) } };
   }
   facingTarget() {
     const p = this.player, d = DIRS[p.dir];
@@ -213,16 +268,18 @@ export class Game {
       if (inp.hit('KeyQ')) this.dropHeld();
     }
     const kb = inp.down('Space') || inp.hit('KeyF');
-    if (kb) { this.target = this.targetDirect = this.facingTarget(); this.kbUntil = performance.now() + 600; }
+    if (kb) { this.target = this.targetDirect = this.roofT = this.facingTarget(); this.kbUntil = performance.now() + 600; }
     else if (!(this.kbUntil > performance.now()) || m.moved > this.kbUntil - 600) {
       const mt = this.mouseTargets();
-      this.target = mt.smart; this.targetDirect = mt.direct;
+      this.target = mt.smart; this.targetDirect = mt.direct; this.roofT = mt.roof;
     }
     // 빈 칸에 쓰는 물건(설치물·씨앗·괭이)을 들었으면 마우스 아래 칸을 그대로 겨냥한다
     {
-      const held = this.heldDef(), d = this.targetDirect;
+      const held = this.heldDef(), d = this.targetDirect, rt = this.roofT;
       const usesEmpty = held && (held.place || held.seed || held.tool === 'hoe');
-      this.cursor = usesEmpty && d.inReach && this.world.obj(this.layer, d.x, d.y) === O.NONE ? d : this.target;
+      // 지붕을 들고 있거나, 닫힌 지붕이 가리고 있으면 그 지붕 칸을 겨냥한다
+      if (rt && (this.roofEdit || this.roofBlocks(rt.x, rt.y))) this.cursor = { x: rt.x, y: rt.y, inReach: rt.inReach, roof: true };
+      else this.cursor = usesEmpty && d.inReach && this.world.obj(this.layer, d.x, d.y) === O.NONE ? d : this.target;
     }
     // 상호작용 안내
     this.prompt = null;
@@ -244,8 +301,9 @@ export class Game {
     const held = this.heldDef(), w = this.world, L = this.layer;
     const t = this.cursor;
     if (!t.inReach) { this.mining = null; if (hit && held && held.food) this.eat(); return; }
+    if (t.roof) return this.roofEdit ? this.roofPaint(t, hit) : this.mine(t, ROOF_DEF, dt, hit, () => this.removeRoof(t.x, t.y));
     const o = w.obj(L, t.x, t.y);
-    if (o !== O.NONE) return this.mine(t, o, dt, hit);
+    if (o !== O.NONE) return this.mine(t, OBJ[o], dt, hit);
     this.mining = null;
     const g = w.ground(L, t.x, t.y), i = w.idx(t.x, t.y);
     if (!hit && this.lastAct === i) return;
@@ -272,6 +330,7 @@ export class Game {
         case 'cave': return this.travel(CAVE, t.x, t.y);
         case 'ladder': return this.travel(SURFACE, t.x, t.y);
         case 'bed': return this.sleep();
+        case 'flag': return this.ui.open('flag', { x: t.x, y: t.y, l: L });
         case 'door': {
           if (m === 1 && this.playerOverlaps(t.x, t.y)) return;
           w.setMeta(L, t.x, t.y, m ? 0 : 1); this.audio.play('door');
@@ -308,8 +367,8 @@ export class Game {
   }
 
   // ── 채굴 ──
-  mine(t, o, dt, hit) {
-    const def = OBJ[o], held = this.heldDef(), p = this.player;
+  mine(t, def, dt, hit, onBreak) {
+    const held = this.heldDef(), p = this.player;
     this.faceTo(t);
     if (!def.canBreak) {
       this.mining = null;
@@ -332,16 +391,16 @@ export class Game {
       return;
     }
     let mn = this.mining;
-    if (!mn || mn.x !== t.x || mn.y !== t.y) mn = this.mining = { x: t.x, y: t.y, t: 0, hitT: 0, total: 1 };
+    if (!mn || mn.x !== t.x || mn.y !== t.y || mn.roof !== !!t.roof) mn = this.mining = { x: t.x, y: t.y, t: 0, hitT: 0, total: 1, roof: !!t.roof };
     mn.total = def.hard / ((right ? TOOL_SPEED[tier] : 1) * (p.hunger <= 0 ? 0.6 : 1));
     mn.t += dt; mn.hitT -= dt;
     if (mn.hitT <= 0) {
       mn.hitT = 0.27; p.swing = 0.22;
       this.audio.play('hit_' + def.mat);
-      this.shake = { x: t.x, y: t.y, t: 0.16 };
+      if (!t.roof) this.shake = { x: t.x, y: t.y, t: 0.16 };
       this.burst(t.x * TILE + 8, t.y * TILE + 6, def.pcol, 3, 45);
     }
-    if (mn.t >= mn.total) { this.breakObj(t.x, t.y); this.mining = null; }
+    if (mn.t >= mn.total) { if (onBreak) onBreak(); else this.breakObj(t.x, t.y); this.mining = null; }
   }
 
   breakObj(x, y) {
@@ -406,6 +465,7 @@ export class Game {
     this.stats.placed[it.id] = (this.stats.placed[it.id] || 0) + 1;
     checkQuests(this);
     this.updateSeen();
+    if (it.place && it.place.obj === O.FLAG) this.ui.open('flag', { x, y, l: L });   // 세우자마자 색 고르기
   }
 
   eat() {

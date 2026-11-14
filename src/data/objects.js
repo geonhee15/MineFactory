@@ -6,7 +6,7 @@ export const O = {
   ROCK: 20, ANDESITE: 21, GRANITE: 22, COAL_ORE: 23, IRON_ORE: 24, COPPER_ORE: 25, GOLD_ORE: 26, BEDROCK: 27,
   STALAGMITE: 28, GLOWSHROOM: 29, CRYSTAL: 30,
   WORKBENCH: 31, FURNACE: 32, CHEST: 33, TORCH: 34, WOOD_WALL: 35, STONE_BRICK: 36, DOOR: 37, BED: 38,
-  SAPLING: 39, WHEAT: 40, CARROT: 41,
+  SAPLING: 39, WHEAT: 40, CARROT: 41, FLAG: 42,
 };
 
 // 재질별 파티클 색
@@ -97,5 +97,12 @@ def(O.CARROT, {
   name: '당근', spr: 'o_carrot', byMeta: 4, hard: 0.15, pcol: [0xf08a2e, 0x7cc653], crop: true, grow: [80, 120],
   drops: (m) => (m >= 3 ? [['carrot', 2, 3]] : [['carrot', 1, 1]]),
 });
+
+// ── 깃발 ── (meta = 색 번호. 지도에 같은 색 깃발로 표시된다)
+export const FLAG_COLORS = [
+  { name: '빨강', c: 0xe2504a }, { name: '주황', c: 0xf08a2e }, { name: '노랑', c: 0xf6cf3f }, { name: '초록', c: 0x58b548 },
+  { name: '하늘', c: 0x4fc3e8 }, { name: '파랑', c: 0x4a6fe0 }, { name: '보라', c: 0x9a5fd6 }, { name: '분홍', c: 0xf07ab0 },
+];
+def(O.FLAG, { name: '깃발', spr: 'o_flag', byMeta: FLAG_COLORS.length, frames: 3, tall: true, hard: 0.3, drops: [['flag', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'flag' });
 
 export const isWall = (o) => OBJ[o].wall;

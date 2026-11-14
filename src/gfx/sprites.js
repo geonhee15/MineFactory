@@ -2,6 +2,7 @@
 import { Pix, Atlas, shade, mix } from './pix.js';
 import { mulberry32, clamp } from '../rng.js';
 import { buildItemSprites } from './sprites_items.js';
+import { FLAG_COLORS } from '../data/objects.js';
 
 export const K = 0x241a2b; // 기본 외곽선 색
 
@@ -628,6 +629,35 @@ function carrotCrop(stage) {
   return p;
 }
 
+// ── 지붕 · 깃발 ─────────────────────────────────────────────
+const ROOF = { hi: 0xd68060, l: 0xc4664a, b: 0xa8503a, d: 0x86392c, dd: 0x6a2a22 };
+function texRoof(seed) {
+  const p = new Pix(16, 16), r = mulberry32(seed);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const row = y >> 2, ly = y & 3, lx = (x + (row % 2 ? 2 : 0)) & 3;       // 4x4 기와가 한 줄씩 엇갈린다
+    let c = ly === 0 ? ROOF.l : ly === 3 ? ROOF.dd : ROOF.b;
+    if (lx === 3 && ly !== 3) c = ROOF.d;
+    if (ly === 0 && lx === 0) c = ROOF.hi;
+    if (ly === 2 && lx < 3 && r() < 0.14) c = ROOF.d;
+    p.set(x, y, c);
+  }
+  return p;
+}
+function flagSprite(color, frame) {
+  const p = new Pix(16, 26), l = shade(color, 1.22), d = shade(color, 0.72);
+  for (let cx = 0; cx < 10; cx++) {
+    const ph = (cx / 9) * Math.PI * 1.6 - frame * 2.1;
+    const yo = Math.round(Math.sin(ph) * (cx / 9) * 1.6), sh = Math.cos(ph);
+    for (let cy = 0; cy < 7; cy++) p.set(6 + cx, 3 + cy + yo, cy === 6 ? d : sh > 0.45 ? l : sh < -0.45 ? d : color);
+  }
+  for (let y = 2; y < 25; y++) { p.set(4, y, 0xf0f0f5); p.set(5, y, 0x9aa0aa); }
+  p.set(4, 1, 0xfff1a0); p.set(5, 1, 0xf2c53d);
+  p.outline(K);
+  const out = new Pix(16, 26);
+  out.ellipse(4.5, 24.2, 4, 1.4, 0x000000, 60);
+  return out.blit(p);
+}
+
 // ── 오버레이 ───────────────────────────────────────────────
 function crackSprite(stage) {
   const p = new Pix(16, 16);
@@ -739,6 +769,14 @@ export function buildSprites() {
     anchored(`o_wheat_${k}`, wheat(k));
     anchored(`o_carrot_${k}`, carrotCrop(k));
   }
+
+  // 지붕: 벽보다 높이 떠 있다 (그리는 위치는 렌더러가 ROOF_LIFT로 정한다)
+  for (let v = 0; v < 2; v++) { const t = texRoof(4001 + v); if (!v) texs.roof = t; A(`r_roof_${v}`, t, 0, -6); }
+  { const p = new Pix(16, 2); p.rect(0, 0, 16, 1, 0x000000, 160); p.rect(0, 1, 16, 1, 0xffffff, 60); A('r_rim_N', p, 0, -6); }
+  { const p = new Pix(1, 16); p.rect(0, 0, 1, 16, 0x000000, 150); A('r_rim_W', p, 0, -6); A('r_rim_E', p, 15, -6); }
+  { const p = new Pix(16, 6); p.rect(0, 0, 16, 1, ROOF.dd); p.rect(0, 1, 16, 2, shade(ROOF.dd, 0.7)); p.rect(0, 3, 16, 1, 0x000000, 120); p.rect(0, 4, 16, 1, 0x000000, 70); p.rect(0, 5, 16, 1, 0x000000, 30); A('r_rim_S', p, 0, 4); }
+  // 깃발: 색 8가지 x 펄럭임 3프레임
+  FLAG_COLORS.forEach((fc, m) => { for (let f = 0; f < 3; f++) anchored(`o_flag_${m}_${f}`, flagSprite(fc.c, f)); });
 
   buildItemSprites(atlas, { texs });
   return atlas;
