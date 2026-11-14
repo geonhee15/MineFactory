@@ -1,4 +1,7 @@
 // 전역 상수
+// 버전 규칙:  0.0.1 ↑ 버그 수정·문구·작은 조정  |  0.1 ↑ 새 기능·콘텐츠  |  1.0 = 공장→로켓→화성까지 끝까지 플레이 가능해질 때
+// 올릴 때는 package.json 과 README 의 버전·기록도 함께 맞춘다.
+export const VERSION = '0.2.1';
 export const TILE = 16;            // 타일 한 칸의 도트 크기
 export const MAP_W = 512;
 export const MAP_H = 512;

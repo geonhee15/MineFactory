@@ -1,5 +1,5 @@
 // DOM 기반 UI: HUD, 단축바, 가방·제작·화로·상자 창, 지도, 타이틀·일시정지 메뉴
-import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH } from './config.js';
+import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH, VERSION } from './config.js';
 import { GROUND } from './data/ground.js';
 import { OBJ, FLAG_COLORS } from './data/objects.js';
 import { hex } from './gfx/pix.js';
@@ -91,7 +91,8 @@ export class UI {
           <button class="btn" data-act="join">친구 방에 참가</button>
           <div class="row2"><button class="btn small" data-act="saves">세이브 관리</button><button class="btn small" data-act="help">조작법</button></div>
         </div>
-        <div id="foot">v0.2 · 지상과 지하 · 멀티플레이 · 소리를 켜고 즐겨 주세요</div>
+        <div id="foot">v${VERSION} · 지상과 지하 · 멀티플레이 · 소리를 켜고 즐겨 주세요</div>
+        <div id="credit">Developed by <b>Geonhee15</b> with <b>Claude Fable 5.2</b></div>
       </div>
       <div id="pause" class="hidden"><div class="shade"></div>
         <div class="panel center" style="width:310px">
