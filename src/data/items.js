@@ -67,7 +67,10 @@ for (const [mat, ko, tier] of TIERS) {
   item(`${mat}_pickaxe`, `${ko} 곡괭이`, '돌과 광석을 캔다.', { stack: 1, tool: 'pick', tier });
   item(`${mat}_axe`, `${ko} 도끼`, '나무를 빠르게 벤다.', { stack: 1, tool: 'axe', tier });
   item(`${mat}_hoe`, `${ko} 괭이`, '풀밭이나 흙을 갈아 경작지로 만든다.', { stack: 1, tool: 'hoe', tier });
+  item(`${mat}_shovel`, `${ko} 삽`, '땅을 다져 길로 만든다. 누른 채 끌면 이어서 다져지고, 길을 누르면 다시 흙으로 돌아간다.', { stack: 1, tool: 'shovel', tier });
 }
+// 삽 등급별 한 칸 다지는 간격(초)
+export const SHOVEL_COOL = [0.3, 0.26, 0.18, 0.11];
 
 // 도구 등급별 채굴 속도 배수 (0 = 맨손)
 export const TOOL_SPEED = [1, 2.6, 4.2, 6.8];
@@ -85,12 +88,15 @@ R('flag', 1, { stick: 2, fiber: 3 });
 R('wood_pickaxe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
 R('wood_axe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
 R('wood_hoe', 1, { plank: 2, stick: 2 }, 'workbench', 'tool');
+R('wood_shovel', 1, { plank: 1, stick: 2 }, 'workbench', 'tool');
 R('stone_pickaxe', 1, { stone: 3, stick: 2 }, 'workbench', 'tool');
 R('stone_axe', 1, { stone: 3, stick: 2 }, 'workbench', 'tool');
 R('stone_hoe', 1, { stone: 2, stick: 2 }, 'workbench', 'tool');
+R('stone_shovel', 1, { stone: 1, stick: 2 }, 'workbench', 'tool');
 R('iron_pickaxe', 1, { iron_ingot: 3, stick: 2 }, 'workbench', 'tool');
 R('iron_axe', 1, { iron_ingot: 3, stick: 2 }, 'workbench', 'tool');
 R('iron_hoe', 1, { iron_ingot: 2, stick: 2 }, 'workbench', 'tool');
+R('iron_shovel', 1, { iron_ingot: 1, stick: 2 }, 'workbench', 'tool');
 
 R('furnace', 1, { stone: 8 }, 'workbench', 'build');
 R('chest', 1, { plank: 8 }, 'workbench', 'build');

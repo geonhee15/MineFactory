@@ -2,7 +2,7 @@
 import { TILE, MAP_W, MAP_H, SURFACE, CAVE, DAY_LENGTH, REACH, INV_SIZE, HOTBAR, WALL_LIFT, ROOF_LIFT } from './config.js';
 import { G, GROUND } from './data/ground.js';
 import { O, OBJ, SAPLING_TREES } from './data/objects.js';
-import { ITEMS, TOOL_SPEED, SMELT } from './data/items.js';
+import { ITEMS, TOOL_SPEED, SHOVEL_COOL, SMELT } from './data/items.js';
 import { World } from './world/world.js';
 import { generate } from './world/gen.js';
 import { Inventory, maxStack } from './inventory.js';
@@ -316,10 +316,10 @@ export class Game {
       const mt = this.mouseTargets();
       this.target = mt.smart; this.targetDirect = mt.direct; this.roofT = mt.roof;
     }
-    // 빈 칸에 쓰는 물건(설치물·씨앗·괭이)을 들었으면 마우스 아래 칸을 그대로 겨냥한다
+    // 빈 칸에 쓰는 물건(설치물·씨앗·괭이·삽)을 들었으면 마우스 아래 칸을 그대로 겨냥한다
     {
       const held = this.heldDef(), d = this.targetDirect, rt = this.roofT;
-      const usesEmpty = held && (held.place || held.seed || held.tool === 'hoe');
+      const usesEmpty = held && (held.place || held.seed || held.tool === 'hoe' || held.tool === 'shovel');
       // 지붕을 들고 있거나, 닫힌 지붕이 가리고 있으면 그 지붕 칸을 겨냥한다
       if (rt && (this.roofEdit || this.roofBlocks(rt.x, rt.y))) this.cursor = { x: rt.x, y: rt.y, inReach: rt.inReach, roof: true };
       else this.cursor = usesEmpty && d.inReach && this.world.obj(this.layer, d.x, d.y) === O.NONE ? d : this.target;
@@ -352,6 +352,7 @@ export class Game {
     if (!hit && this.lastAct === i) return;
     // 새로 누른 클릭은 항상 바로 반응하고, 누르고 있을 때의 연속 동작만 간격을 둔다
     if (held && held.tool === 'hoe') { if (hit || this.cool <= 0) this.till(t, g, hit); }
+    else if (held && held.tool === 'shovel') { if (hit || this.cool <= 0) this.pave(t, g, hit, held); }
     else if (held && (held.place || held.seed)) { if (hit || this.cool <= 0) this.place(t, held, hit); }
     else if (g === G.PLANK && hit) {
       w.setGround(L, t.x, t.y, L === CAVE ? G.CAVE : G.DIRT);
@@ -388,6 +389,7 @@ export class Game {
       if (held && d.inReach && w.obj(L, d.x, d.y) === O.NONE) {
         if (held.place || held.seed) return this.place(d, held, true);
         if (held.tool === 'hoe') return this.till(d, w.ground(L, d.x, d.y), true);
+        if (held.tool === 'shovel') return this.pave(d, w.ground(L, d.x, d.y), true, held);
       }
     }
     if (held && held.food) this.eat();
@@ -508,6 +510,18 @@ export class Game {
     this.lastAct = w.idx(t.x, t.y);
     this.audio.play('till'); this.cool = 0.28; this.player.swing = 0.22; this.faceTo(t);
     this.burst(t.x * TILE + 8, t.y * TILE + 8, [0x9c6b43, 0x6e4a2e, 0x855837], 6, 45);
+  }
+
+  // 삽: 땅을 다져 길로 만든다. 누른 첫 칸이 길이면 '되돌리기', 아니면 '다지기'로 정해져 끌어서 이어 갈 수 있다
+  pave(t, g, hit, held) {
+    const w = this.world, L = this.layer;
+    if (hit) this.paveMode = g === G.PATH ? 'undo' : 'pave';
+    if (this.paveMode === 'pave' && GROUND[g].pave) w.setGround(L, t.x, t.y, G.PATH);
+    else if (this.paveMode === 'undo' && g === G.PATH) w.setGround(L, t.x, t.y, G.DIRT);
+    else { if (hit) { this.ui.toast('풀밭 · 흙 · 모래 · 자갈만 다질 수 있어요'); this.audio.play('deny'); } return; }
+    this.lastAct = w.idx(t.x, t.y);
+    this.audio.play('shovel'); this.cool = SHOVEL_COOL[held.tier] ?? 0.26; this.player.swing = 0.2; this.faceTo(t);
+    this.burst(t.x * TILE + 8, t.y * TILE + 8, this.paveMode === 'pave' ? [0xc7a878, 0xb08f61, 0xe6d2ae] : [0x9c6b43, 0x855837, 0xb48152], 5, 40);
   }
 
   place(t, it, hit) {

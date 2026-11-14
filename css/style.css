@@ -76,7 +76,13 @@ button { font-family: var(--font); }
 #coords { font-size: 11px; color: var(--dim); text-align: center; margin-top: 4px; }
 #hints { position: absolute; left: 12px; bottom: 12px; font-size: 11px; color: var(--dim); text-shadow: 1px 1px 0 #000; line-height: 1.6; }
 #hints b { color: var(--ink); font-weight: normal; }
-#pickups { position: absolute; right: 12px; bottom: 14px; display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
+#pickups { position: absolute; right: 12px; bottom: 62px; display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
+#hover { position: absolute; right: 12px; bottom: 14px; display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 5px; white-space: nowrap;
+  background: rgba(20, 22, 33, 0.82); border: 2px solid var(--edge); font-size: 12px; text-shadow: 1px 1px 0 #000; pointer-events: none; transition: opacity 0.15s; }
+#hover.far { opacity: 0.6; }
+#hover canvas { width: 32px; height: 32px; image-rendering: pixelated; }
+#hover .sub { color: var(--dim); font-size: 11px; }
+#hover .sub:empty { display: none; }
 .pk { display: flex; align-items: center; gap: 6px; padding: 2px 8px 2px 4px; background: rgba(15, 17, 26, 0.8); font-size: 12px;
   border-left: 3px solid var(--good); animation: pk 0.18s ease-out; transition: opacity 0.4s; }
 .pk .ico { width: 20px; height: 20px; background: center / contain no-repeat; image-rendering: pixelated; }

@@ -1,7 +1,7 @@
 // DOM 기반 UI: HUD, 단축바, 가방·제작·화로·상자 창, 지도, 타이틀·일시정지 메뉴
 import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH, VERSION } from './config.js';
 import { GROUND } from './data/ground.js';
-import { OBJ, FLAG_COLORS } from './data/objects.js';
+import { O, OBJ, FLAG_COLORS, SAPLING_ITEMS } from './data/objects.js';
 import { hex } from './gfx/pix.js';
 import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES } from './data/items.js';
 import { maxStack } from './inventory.js';
@@ -67,6 +67,7 @@ export class UI {
         <input id="chatin" class="hidden" maxlength="120" placeholder="메시지를 쓰고 Enter (취소: Esc)" autocomplete="off">
         <div id="hints"><b>WASD</b> 이동 · <b>좌클릭</b> 캐기/놓기 · <b>우클릭</b> 사용/먹기<br><b>E</b> 가방·제작 · <b>M</b> 지도 · <b>Q</b> 버리기 · <b>Esc</b> 메뉴</div>
         <div id="pickups"></div>
+        <div id="hover" class="hidden"><canvas width="32" height="32"></canvas><span id="hovername"></span><span id="hoversub" class="sub"></span></div>
         <div id="prompt" class="hidden"></div>
         <div id="heldname"></div>
         <div id="hotbar"></div>
@@ -113,7 +114,7 @@ export class UI {
           <div class="title-bar"><h2>조작법</h2><button class="x" data-act="help">✕</button></div>
           <div class="keys">
             <kbd>W A S D / 방향키</kbd><span>이동</span>
-            <kbd>좌클릭 (길게)</kbd><span>캐기 · 베기 / 들고 있는 것 놓기 · 심기 · 갈기</span>
+            <kbd>좌클릭 (길게)</kbd><span>캐기 · 베기 / 들고 있는 것 놓기 · 심기 · 갈기 · 다지기</span>
             <kbd>우클릭</kbd><span>사용하기 (제작대·화로·상자·동굴·열매 따기) / 먹기</span>
             <kbd>1 ~ 9 · 마우스 휠</kbd><span>단축바 선택</span>
             <kbd>E · Tab</kbd><span>가방과 제작 창</span>
@@ -123,7 +124,7 @@ export class UI {
             <kbd>- · =</kbd><span>화면 확대 / 축소</span>
             <kbd>Esc</kbd><span>창 닫기 · 일시정지</span>
           </div>
-          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.</div>
+          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.<br><b>삽</b>을 들고 땅을 누른 채 끌면 길이 다져져요. 길은 지도에도 보입니다.<br>마우스로 가리킨 것의 이름은 화면 <b>오른쪽 아래</b>에 나옵니다.</div>
         </div>
       </div>
       <div id="join" class="hidden"><div class="shade"></div>
@@ -781,6 +782,37 @@ export class UI {
   }
 
   // ── 매 프레임 ──
+  // 지금 가리키는 것(캐거나 쓰게 될 대상)의 이름과 그림: 떨어진 아이템 → 지붕 → 오브젝트 → 땅
+  hoverInfo() {
+    const g = this.game, c = g.cursor, w = g.world, L = g.layer, A = this.atlas;
+    if (this.blocking || g.fade || !c || !w.inb(c.x, c.y)) return null;
+    const far = !c.inReach;
+    if (c.roof && w.roof(L, c.x, c.y)) return { key: 'roof', name: ITEMS.roof.name, spr: A.get('i_roof'), far };
+    if (!(g.kbUntil > performance.now())) {             // 키보드로 겨냥하는 중이 아니면 마우스 아래 아이템부터
+      const m = g.input.mouse, pt = this.renderer.screenToWorld(m.x, m.y);
+      for (const d of g.drops) {
+        if (d.layer !== L || Math.abs(d.x - pt.x) > 6 || pt.y < d.y - 12 - d.z || pt.y > d.y + 1 - d.z) continue;
+        return { key: `d${d.id}x${d.n}`, name: ITEMS[d.id].name, sub: d.n > 1 ? `×${d.n}` : '', spr: A.get(ITEMS[d.id].icon) };
+      }
+    }
+    const Lr = w.layers[L], i = w.idx(c.x, c.y), o = Lr.obj[i], meta = Lr.meta[i];
+    if (L === CAVE && !Lr.seen[i]) return null;          // 아직 밝혀지지 않은 곳은 알려 주지 않는다
+    if (o) {
+      const def = OBJ[o];
+      if (def.wall && L === CAVE && !w.exposed(L, c.x, c.y)) return null;
+      let name = def.name, sub = '';
+      if (o === O.SAPLING) name = (ITEMS[SAPLING_ITEMS[meta]] || def).name;
+      else if (o === O.FLAG && FLAG_COLORS[meta]) name = `${FLAG_COLORS[meta].name} 깃발`;
+      if (def.crop) sub = meta >= 3 ? '다 자람' : '자라는 중';
+      else if (def.harvest && meta) sub = def.harvest.item === 'apple' ? '사과 열림' : '열매 열림';
+      return { key: `o${o}:${meta}`, name, sub, spr: this.renderer.objSprite(def, meta, c.x, c.y), far };
+    }
+    const gid = Lr.ground[i], gd = GROUND[gid];
+    if (!gd || !gd.name) return null;
+    const gs = this.renderer.gs[gid] && this.renderer.gs[gid][0];
+    return { key: 'g' + gid, name: gd.name, spr: Array.isArray(gs) ? gs[0] : gs, far };
+  }
+
   update(dt) {
     const g = this.game;
     this.$('fade').style.opacity = g.fadeAlpha;
@@ -811,6 +843,23 @@ export class UI {
       p.classList.toggle('hidden', !v);
       if (v) p.innerHTML = `<b>우클릭 · F</b>&nbsp; ${v}`;
     });
+    // 가리킨 대상 이름표 (오른쪽 아래)
+    const hv = this.hoverInfo();
+    set('hover', hv ? hv.key : '', () => {
+      const box = this.$('hover');
+      box.classList.toggle('hidden', !hv);
+      if (!hv) return;
+      this.$('hovername').textContent = hv.name;
+      this.$('hoversub').textContent = hv.sub || '';
+      const c = box.firstChild.getContext('2d'), sp = hv.spr;
+      c.clearRect(0, 0, 32, 32);
+      if (sp) {
+        const k = Math.min(2, 32 / sp.w, 32 / sp.h), dw = Math.round(sp.w * k), dh = Math.round(sp.h * k);
+        c.imageSmoothingEnabled = false;
+        c.drawImage(this.atlas.canvas, sp.x, sp.y, sp.w, sp.h, (32 - dw) >> 1, (32 - dh) >> 1, dw, dh);
+      }
+    });
+    set('hoverfar', !!(hv && hv.far), (v) => this.$('hover').classList.toggle('far', v));
     // 들고 있는 아이템 이름
     const hs = g.heldSlot(), hid = (hs ? hs.id : '') + '@' + g.hotbar;
     if (this.cache.heldid !== hid) {

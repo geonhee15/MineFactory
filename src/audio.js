@@ -272,6 +272,7 @@ export class AudioSys {
         T({ f: 210, f2: 150, dur: 0.1, vol: 0.12, t: 0.3 });
         break;
       case 'till': N({ f: 720 * p, f2: 300, q: 0.8, dur: 0.17, vol: 0.4 }); T({ type: 'triangle', f: 140, f2: 80, dur: 0.1, vol: 0.25 }); break;
+      case 'shovel': N({ type: 'lowpass', f: 560 * p, f2: 210, dur: 0.12, vol: 0.4 }); T({ type: 'triangle', f: 118, f2: 68, dur: 0.1, vol: 0.3 }); N({ f: 1700 * p, q: 1.2, dur: 0.04, vol: 0.1, t: 0.03 }); break;
       case 'plant': T({ f: 500 * p, f2: 760, dur: 0.07, vol: 0.14 }); N({ type: 'lowpass', f: 600, dur: 0.05, vol: 0.16 }); break;
       case 'pluck': T({ f: 900 * p, f2: 1400, dur: 0.05, vol: 0.14 }); N({ f: 2500, q: 0.8, dur: 0.07, vol: 0.15 }); break;
       case 'deny': this.tone({ type: 'square', f: 185, dur: 0.07, vol: 0.07 }); this.tone({ type: 'square', f: 140, dur: 0.1, vol: 0.07, t: 0.08 }); break;

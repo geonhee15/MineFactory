@@ -14,7 +14,7 @@ import { ITEMS } from './data/items.js';
 import { pack, unpack, gzip, gunzip, b64enc, b64dec, restoreWorld, loadProfile } from './save.js';
 
 const N = MAP_W * MAP_H;
-const PROTO = 1;                       // 통신 규칙 버전 (다르면 접속 거절)
+const PROTO = 2;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
 const PREFIX = 'mf1-';
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
 export const MAX_PLAYERS = 8;

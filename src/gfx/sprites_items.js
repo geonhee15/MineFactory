@@ -145,6 +145,25 @@ const HOE = [
   '................',
   '................',
 ];
+// 삽은 외곽선 없이 그리고 outline()으로 두른다
+const SHOVEL = [
+  '................',
+  '.............m..',
+  '..........mmmmM.',
+  '.........mmmmM..',
+  '.........mmmMM..',
+  '..........mMMM..',
+  '.........w.MM...',
+  '........w.......',
+  '.......w........',
+  '......w.........',
+  '.....w..........',
+  '....w...........',
+  '...w............',
+  '..W.............',
+  '................',
+  '................',
+];
 const HEADS = { wood: [0xcfa468, 0x96693a], stone: [0xb9bec8, 0x70757f], iron: [0xeef2f7, 0xa4adbd] };
 
 const LOG = [
@@ -377,6 +396,7 @@ export function buildItemSprites(atlas, { texs }) {
     I(`${mat}_pickaxe`, art(PICK, pal));
     I(`${mat}_axe`, art(AXE, pal));
     I(`${mat}_hoe`, art(HOE, pal));
+    I(`${mat}_shovel`, art(SHOVEL, pal).outline(K));
   }
 
   buildPlayer(atlas);

@@ -16,6 +16,7 @@ export const PAL = {
   cave: { l: 0x5d5564, b: 0x4d4654, d: 0x3f3946, dd: 0x322d38, p: 0x6e6676 },
   gravel: { l: 0x847d8c, b: 0x6a6470, d: 0x544f5a, dd: 0x433f48 },
   farm: { l: 0x86603e, b: 0x6e4a2e, d: 0x573823, dd: 0x452b1a },
+  path: { l: 0xd6b98c, b: 0xc7a878, d: 0xb08f61, dd: 0x8e6f48, p: 0xe6d2ae },
   plank: { hi: 0xdab676, l: 0xcfa468, b: 0xb8894f, d: 0x96693a, dd: 0x6e4a28 },
   bark: { l: 0x96693f, b: 0x7a5536, d: 0x5a3d26, o: 0x3a2618 },
   birch: { l: 0xf3f0e6, b: 0xdcd8ca, d: 0xb5b0a2, o: 0x4a4550 },
@@ -107,6 +108,15 @@ function texFarm(seed) {
     if (r() < 0.12) c = m < 2 ? g.d : g.b;
     p.set(x, y, c);
   }
+  return p;
+}
+// 삽으로 다진 길: 흙보다 밝고 고르며, 밟힌 자국과 잔돌이 조금 있다
+function texPath(seed) {
+  const p = new Pix(16, 16), r = mulberry32(seed), g = PAL.path;
+  p.fill(g.b);
+  for (let i = 0; i < 5; i++) { const x = ri(r, 12), y = ri(r, 16), w = 2 + ri(r, 3); for (let k = 0; k < w; k++) p.set(x + k, y, g.l); }
+  for (let i = 0; i < 4; i++) { const x = ri(r, 14), y = ri(r, 16); p.set(x, y, g.d); p.set(x + 1, y, g.d); }
+  for (let i = 0; i < 2; i++) { const x = 1 + ri(r, 13), y = 1 + ri(r, 13); p.set(x, y, g.p); p.set(x, y + 1, g.dd); }
   return p;
 }
 function texPlank(seed) {
@@ -689,6 +699,7 @@ export function buildSprites() {
   ground('g_cave', 4, (v) => texCave(601 + v));
   ground('g_plank', 2, (v) => texPlank(701 + v));
   ground('g_gravel', 3, (v) => texGravel(801 + v));
+  ground('g_path', 3, (v) => texPath(1201 + v));
   for (let v = 0; v < 2; v++) for (let f = 0; f < 4; f++) {
     const w = texWater(1001 + v * 13, f, PAL.water), d = texWater(1101 + v * 13, f, PAL.deep);
     if (!v && !f) { texs.g_water = w; texs.g_deep = d; }
@@ -701,6 +712,7 @@ export function buildSprites() {
   addEdges(atlas, 'g_cave', texs.g_cave, PAL.cave.dd, 15);
   addEdges(atlas, 'g_gravel', texs.g_gravel, PAL.gravel.dd, 16);
   addEdges(atlas, 'g_farm', texs.g_farm, PAL.farm.dd, 17);
+  addEdges(atlas, 'g_path', texs.g_path, PAL.path.dd, 19);
   addEdges(atlas, 'g_water', texs.g_water, PAL.water.l, 18);
   addFoam(atlas);
 
