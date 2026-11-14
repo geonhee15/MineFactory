@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>MineFactory — 스프라이트 아틀라스 미리보기</title>
+<style>
+  body { margin: 0; background: #3a3f4c; color: #eee; font: 12px sans-serif; }
+  canvas { image-rendering: pixelated; display: block; }
+  #bg { display: flex; gap: 8px; padding: 6px; }
+  button { font: inherit; }
+</style>
+<div id="bg">개발용: 코드로 그린 모든 도트를 한눈에 봅니다.
+  <button data-s="2">2x</button><button data-s="3">3x</button><button data-s="4">4x</button><button data-s="6">6x</button>
+</div>
+<canvas id="c"></canvas>
+<script type="module">
+  import { buildSprites } from '../src/gfx/sprites.js';
+  const atlas = buildSprites();
+  window.atlas = atlas;
+  const c = document.getElementById('c'), x = c.getContext('2d');
+  // 실제로 사용된 높이까지만 표시
+  const used = atlas.y + atlas.rowH + 2;
+  function draw(s) {
+    c.width = atlas.canvas.width * s; c.height = used * s;
+    x.imageSmoothingEnabled = false;
+    x.fillStyle = '#5b8f4a'; x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(atlas.canvas, 0, 0, atlas.canvas.width, used, 0, 0, c.width, c.height);
+  }
+  const q = new URLSearchParams(location.search);
+  draw(Number(q.get('s')) || 3);
+  document.querySelectorAll('button').forEach((b) => (b.onclick = () => draw(Number(b.dataset.s))));
+  document.title = `아틀라스: ${Object.keys(atlas.map).length}개 스프라이트, 높이 ${used}px`;
+</script>
+</html>
