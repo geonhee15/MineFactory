@@ -7,7 +7,8 @@ import { World } from './world/world.js';
 import { generate } from './world/gen.js';
 import { Inventory, maxStack } from './inventory.js';
 import { checkQuests } from './quests.js';
-import { saveGame, restoreWorld } from './save.js';
+import { saveGame, restoreWorld, saveProfile, newId } from './save.js';
+import { Net } from './net.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
@@ -26,7 +27,9 @@ export class Game {
     this.state = 'title';       // 'title' | 'play'
     this.paused = false;
     this.world = null;
+    this.onDisconnected = () => {};   // 방장과 연결이 끊겼을 때 (main.js가 채운다)
     this.reset();
+    this.net = new Net(this);
   }
 
   reset() {
@@ -37,6 +40,7 @@ export class Game {
     this.inv.onChange = () => { this.ui.dirty = true; };
     this.hotbar = 0;
     this.drops = [];
+    this.dropSeq = 1;
     this.particles = [];
     this.mining = null;
     this.shake = null;
@@ -60,6 +64,7 @@ export class Game {
   newWorld(seed) {
     this.reset();
     this.world = generate(new World(seed));
+    this.world.id = newId();
     const s = this.world.spawn;
     this.player.x = s.x * TILE + 8; this.player.y = s.y * TILE + 10;
     this.hook();
@@ -71,17 +76,44 @@ export class Game {
     Object.assign(this.player, d.player);
     d.inv.forEach((s, i) => { this.inv.slots[i] = s && ITEMS[s.id] ? { id: s.id, n: s.n } : null; });
     this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {}, ...d.stats };
-    this.drops = (d.drops || []).filter((x) => ITEMS[x.id]);
+    this.drops = (d.drops || []).filter((x) => ITEMS[x.id]).map((x) => ({ vx: 0, vy: 0, z: 0, vz: 0, t: 1, age: 0, ...x, uid: this.dropSeq++ }));
     this.hook();
   }
+  // 손님: 방장에게서 받은 세계에 들어간다. 가방·진행도는 내 브라우저에 저장해 둔 것을 쓴다
+  joinWorld(world, data, profile) {
+    this.reset();
+    this.world = world;
+    this.time = data.time;
+    this.drops = (data.drops || []).filter((x) => ITEMS[x.id]).map((x) => ({ vx: 0, vy: 0, z: 0, vz: 0, t: 1, age: 0, ...x }));
+    const s = world.spawn;
+    this.player.x = s.x * TILE + 8 + rand(-12, 12); this.player.y = s.y * TILE + 10;
+    if (profile) {
+      this.layer = profile.layer ? 1 : 0; this.hotbar = profile.hotbar || 0; this.quest = profile.quest || 0;
+      Object.assign(this.player, profile.player);
+      (profile.inv || []).forEach((sl, i) => { if (i < this.inv.slots.length) this.inv.slots[i] = sl && ITEMS[sl.id] ? { id: sl.id, n: sl.n } : null; });
+      this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {}, ...profile.stats };
+      if (profile.seen) profile.seen.forEach((a, l) => { if (a && a.length === world.layers[l].seen.length) world.layers[l].seen.set(a); });
+    }
+    this.hook();
+  }
+  profile() {
+    const p = this.player;
+    return {
+      savedAt: Date.now(), layer: this.layer, hotbar: this.hotbar, quest: this.quest,
+      player: { x: p.x, y: p.y, dir: p.dir, hunger: p.hunger }, inv: this.inv.slots, stats: this.stats,
+      seen: this.world.layers.map((L) => L.seen),
+    };
+  }
   hook() {
-    this.world.onChange = (l) => { this.ui.mapDirty[l] = true; };
+    this.world.onChange = (l, x, y) => { this.ui.mapDirty[l] = true; this.net.mark(l, y * MAP_W + x); };
     this.ui.mapDirty = [true, true];
     this.ui.dirty = true;
   }
   save(manual = false) {
     if (this.state !== 'play') return Promise.resolve();
-    return saveGame(this).then(() => { if (manual) this.ui.toast('저장했어요', 'good'); })
+    // 손님은 세계가 아니라 '내 가방과 진행도'만 저장한다 (세계는 방장의 것)
+    const job = this.net.isGuest ? saveProfile(this.world.id, this.profile()) : saveGame(this);
+    return job.then(() => { if (manual) this.ui.toast('저장했어요', 'good'); })
       .catch((e) => { console.warn('저장 실패', e); if (manual) this.ui.toast('저장에 실패했어요'); });
   }
 
@@ -107,15 +139,13 @@ export class Game {
     if (this.state !== 'play') return;
     this.frameNo++;
     if (this.fade) this.updateFade(dt);
-    if (this.paused) return;
-    this.time += dt;
+    if (this.paused && !this.net.on) return;       // 여럿이 할 때는 세계가 멈추지 않는다
     this.updatePlayer(dt);
     this.updateActions(dt);
     this.updateDrops(dt);
     this.updateParticles(dt);
-    this.simAcc += dt;
-    while (this.simAcc >= 1) { this.simAcc -= 1; this.tickGrowth(1); }
-    this.tickFurnaces(dt);
+    this.simulate(dt);
+    this.net.update(dt);
     this.seenAcc += dt;
     if (this.seenAcc >= 0.25) { this.seenAcc = 0; this.updateSeen(); }
     if (this.shake && (this.shake.t -= dt) <= 0) this.shake = null;
@@ -125,6 +155,19 @@ export class Game {
     if (scene !== this.scene) { this.scene = scene; this.audio.setScene(scene); }
     this.saveAcc += dt;
     if (this.saveAcc > 90) { this.saveAcc = 0; this.save(); }
+  }
+
+  // 세계가 흘러가는 부분: 시간은 모두, 성장·화로는 세계의 주인(혼자 할 때의 나 / 방장)만 계산한다
+  simulate(dt) {
+    this.time += dt;
+    if (this.net.isHost) {
+      this.simAcc += dt;
+      while (this.simAcc >= 1) { this.simAcc -= 1; this.tickGrowth(1); }
+      this.tickFurnaces(dt);
+    } else if (this.net.owned && this.net.owned.ent.type === 'furnace') {
+      const o = this.net.owned;                    // 손님이 열어 둔 화로는 그 손님이 돌린다
+      this.tickFurnace(o.l, o.i, o.ent, dt);
+    }
   }
 
   // ── 플레이어 이동 ──
@@ -325,8 +368,8 @@ export class Game {
       if (def.use || (def.crop && m >= 3)) this.faceTo(t);
       switch (def.use) {
         case 'workbench': return this.ui.open('workbench');
-        case 'furnace': return this.ui.open('furnace', this.ensureEnt(L, i, 'furnace'));
-        case 'chest': return this.ui.open('chest', this.ensureEnt(L, i, 'chest'));
+        case 'furnace': return this.openEnt(L, i, 'furnace');
+        case 'chest': return this.openEnt(L, i, 'chest');
         case 'cave': return this.travel(CAVE, t.x, t.y);
         case 'ladder': return this.travel(SURFACE, t.x, t.y);
         case 'bed': return this.sleep();
@@ -336,16 +379,9 @@ export class Game {
           w.setMeta(L, t.x, t.y, m ? 0 : 1); this.audio.play('door');
           return;
         }
-        case 'harvest': {
-          if (!m) { this.ui.toast('아직 열매가 열리지 않았어요'); this.audio.play('deny'); return; }
-          const h = def.harvest;
-          this.spawnDrop(h.item, randi(h.min, h.max), t.x * TILE + 8, t.y * TILE + 4);
-          w.setMeta(L, t.x, t.y, 0);
-          w.grow[L].set(i, rand(h.regrow[0], h.regrow[1]));
-          this.audio.play('pluck'); this.player.swing = 0.2;
-          this.burst(t.x * TILE + 8, t.y * TILE + 2, def.pcol, 6, 40);
+        case 'harvest':
+          if (!this.harvestAt(t.x, t.y, L)) { this.ui.toast('아직 열매가 열리지 않았어요'); this.audio.play('deny'); }
           return;
-        }
       }
       if (def.crop && m >= 3) { this.audio.play('pluck'); this.breakObj(t.x, t.y); return; }
       const d = this.targetDirect;
@@ -355,6 +391,37 @@ export class Game {
       }
     }
     if (held && held.food) this.eat();
+  }
+
+  // 열매 따기. 드롭은 세계의 주인만 만든다 (손님은 방장에게 부탁)
+  harvestAt(x, y, L = this.layer, remote = false) {
+    const w = this.world, i = w.idx(x, y), def = OBJ[w.obj(L, x, y)];
+    if (!def.harvest || !w.meta(L, x, y)) return false;
+    if (this.net.isGuest) {
+      this.net.send({ t: 'hv', l: L, x, y });
+      this.net.quiet(() => w.setMeta(L, x, y, 0));
+    } else {
+      const h = def.harvest;
+      this.spawnDrop(h.item, randi(h.min, h.max), x * TILE + 8, y * TILE + 4, { layer: L });
+      w.setMeta(L, x, y, 0);
+      w.grow[L].set(i, rand(h.regrow[0], h.regrow[1]));
+    }
+    if (!remote) { this.audio.play('pluck'); this.player.swing = 0.2; }
+    if (L === this.layer) this.burst(x * TILE + 8, y * TILE + 2, def.pcol, 6, 40);
+    return true;
+  }
+
+  // 상자·화로 열기: 여럿이 할 때는 한 번에 한 사람만 쓸 수 있다
+  openEnt(L, i, type) {
+    if (this.net.isGuest) return this.net.requestEnt(L, i);     // 방장이 허락하면 열린다
+    const e = this.ensureEnt(L, i, type);
+    if (e.owner && e.owner !== this.net.id) { this.ui.toast('다른 플레이어가 쓰고 있어요'); this.audio.play('deny'); return; }
+    if (this.net.on) e.owner = this.net.id;
+    this.ui.open(type, e);
+  }
+  entClosed(e) {
+    if (!e || !e.slots) return;
+    if (this.net.isGuest) this.net.closeEnt(); else delete e.owner;
   }
 
   ensureEnt(L, i, type) {
@@ -403,24 +470,34 @@ export class Game {
     if (mn.t >= mn.total) { if (onBreak) onBreak(); else this.breakObj(t.x, t.y); this.mining = null; }
   }
 
-  breakObj(x, y) {
-    const w = this.world, L = this.layer, i = w.idx(x, y);
+  // 부수기. remote = 손님의 부탁으로 방장이 대신 부수는 경우
+  breakObj(x, y, L = this.layer, remote = false) {
+    const w = this.world, i = w.idx(x, y);
     const o = w.obj(L, x, y), def = OBJ[o], m = w.meta(L, x, y);
+    if (!o) return;
     const cx = x * TILE + 8, cy = y * TILE + 8;
-    const drops = typeof def.drops === 'function' ? def.drops(m) : def.drops;
-    if (drops) for (const [id, min, max, chance = 1] of drops) if (Math.random() < chance) this.spawnDrop(id, randi(min, max), cx, cy);
-    const e = w.ents[L].get(i);
-    if (e) { for (const s of e.slots) if (s) this.spawnDrop(s.id, s.n, cx, cy); w.ents[L].delete(i); this.ui.entGone(e); }
-    w.grow[L].delete(i);
-    w.setObj(L, x, y, O.NONE, 0);
-    this.audio.play('break_' + def.mat);
-    this.burst(cx, cy - 2, def.pcol, def.wall ? 12 : 8, 70);
-    if (def.tree) {
-      this.audio.play('treefall');
-      this.burst(cx, cy - 22, OBJ[O.BUSH].pcol, 18, 80, 0.9);
+    if (this.net.isGuest) {
+      // 드롭은 방장이 만든다. 내 화면에서는 기다리지 않고 바로 없앤다
+      this.net.send({ t: 'brk', l: L, x, y });
+      this.net.quiet(() => w.setObj(L, x, y, O.NONE, 0));
+    } else {
+      const e = w.ents[L].get(i);
+      if (e && e.owner && e.owner !== this.net.id) { if (!remote) { this.ui.toast('다른 플레이어가 쓰고 있어요'); this.audio.play('deny'); } return; }
+      const drops = typeof def.drops === 'function' ? def.drops(m) : def.drops;
+      if (drops) for (const [id, min, max, chance = 1] of drops) if (Math.random() < chance) this.spawnDrop(id, randi(min, max), cx, cy, { layer: L });
+      if (e) { for (const s of e.slots) if (s) this.spawnDrop(s.id, s.n, cx, cy, { layer: L }); w.ents[L].delete(i); this.ui.entGone(e); }
+      w.grow[L].delete(i);
+      w.setObj(L, x, y, O.NONE, 0);
     }
-    this.player.hunger = Math.max(0, this.player.hunger - 0.2);
-    this.updateSeen();
+    if (L === this.layer && (!remote || Math.hypot(cx - this.player.x, cy - this.player.y) < 15 * TILE)) {
+      this.audio.play('break_' + def.mat);
+      this.burst(cx, cy - 2, def.pcol, def.wall ? 12 : 8, 70);
+      if (def.tree) {
+        this.audio.play('treefall');
+        this.burst(cx, cy - 22, OBJ[O.BUSH].pcol, 18, 80, 0.9);
+      }
+    }
+    if (!remote) { this.player.hunger = Math.max(0, this.player.hunger - 0.2); this.updateSeen(); }
   }
 
   till(t, g, hit) {
@@ -481,8 +558,7 @@ export class Game {
   dropHeld() {
     const s = this.heldSlot(); if (!s) return;
     const p = this.player, d = DIRS[p.dir];
-    const drop = this.spawnDrop(s.id, 1, p.x + d[0] * 6, p.y - 6 + d[1] * 6);
-    drop.vx = d[0] * 70; drop.vy = d[1] * 70; drop.t = -1.2;
+    this.spawnDrop(s.id, 1, p.x + d[0] * 6, p.y - 6 + d[1] * 6, { vx: d[0] * 70, vy: d[1] * 70, t: -1.2 });
     this.inv.take(this.hotbar, 1);
     this.audio.play('select');
   }
@@ -523,6 +599,7 @@ export class Game {
   }
   sleep() {
     const h = this.hour;
+    if (this.net.isGuest) { this.ui.toast('여럿이 할 때는 방장만 밤을 넘길 수 있어요'); return; }
     if (!(h >= 19 || h < 5)) { this.ui.toast('아직 졸리지 않아요. 저녁 7시 이후에 잘 수 있어요'); return; }
     this.audio.play('sleep');
     this.fadeTo(() => {
@@ -531,6 +608,7 @@ export class Game {
       for (let s = 0; s < remain; s += 20) this.tickGrowth(20);
       this.player.hunger = Math.max(8, this.player.hunger - 10);
       this.ui.banner(`${this.day}일차 아침`);
+      this.net.all({ t: 'tm', time: this.time });
       this.save();
     }, 0.8);
   }
@@ -548,18 +626,43 @@ export class Game {
   }
 
   // ── 드롭 아이템 ──
-  spawnDrop(id, n, x, y) {
-    const d = { id, n, x, y, vx: rand(-22, 22), vy: rand(-22, 14), z: 3, vz: rand(55, 95), t: 0, layer: this.layer, age: 0 };
+  // 드롭은 세계의 주인이 만든다. 손님은 방장에게 부탁하고, 방장이 만든 것이 모두에게 보인다
+  spawnDrop(id, n, x, y, o = {}) {
+    const d = {
+      id, n, x, y, vx: o.vx ?? rand(-22, 22), vy: o.vy ?? rand(-22, 14), z: 3, vz: rand(55, 95),
+      t: o.t ?? 0, layer: o.layer ?? this.layer, age: 0,
+    };
+    if (this.net.isGuest) { this.net.send({ t: 'ds', d }); return null; }
+    d.uid = this.dropSeq++;
     this.drops.push(d);
+    this.net.dropNew(d);
     return d;
   }
+  // 주운 아이템을 가방에 넣는다
+  collect(id, n) {
+    const left = this.inv.add(id, n), gotN = n - left;
+    if (gotN > 0) {
+      this.stats.got[id] = (this.stats.got[id] || 0) + gotN;
+      this.ui.pickup(id, gotN);
+      this.audio.play('pickup');
+      checkQuests(this);
+    }
+    if (left > 0) this.spawnDrop(id, left, this.player.x, this.player.y - 4, { t: -1 });
+  }
+  // 손님: 방장이 "이 드롭은 사라졌다(누가 주웠다)"고 알려 줌
+  takeDrop(uid, mine) {
+    const k = this.drops.findIndex((d) => d.uid === uid);
+    if (k < 0) return;
+    const d = this.drops[k];
+    this.drops.splice(k, 1);
+    if (mine) this.collect(d.id, d.n);
+  }
   updateDrops(dt) {
-    const p = this.player, L = this.layer;
-    let pick = false;
+    const p = this.player, L = this.layer, guest = this.net.isGuest, now = performance.now();
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
       d.age += dt;
-      if (d.age > 900) { this.drops.splice(i, 1); continue; }
+      if (!guest && d.age > 900) { this.drops.splice(i, 1); this.net.dropGone(d.uid, null); continue; }
       if (d.layer !== L) continue;
       d.t += dt;
       d.vz -= 320 * dt; d.z += d.vz * dt;
@@ -572,17 +675,17 @@ export class Game {
         const sp = 60 + (38 - dist) * 6;
         d.x += (dx / (dist || 1)) * sp * dt; d.y += (dy / (dist || 1)) * sp * dt;
         if (dist < 8) {
-          const left = this.inv.add(d.id, d.n), gotN = d.n - left;
-          if (gotN > 0) {
-            this.stats.got[d.id] = (this.stats.got[d.id] || 0) + gotN;
-            this.ui.pickup(d.id, gotN);
-            pick = true;
+          if (guest) {
+            // 두 사람이 동시에 줍지 않도록 방장에게 물어본다
+            if (!(d.claim > now)) { d.claim = now + 1000; this.net.send({ t: 'dq', id: d.uid }); }
+          } else {
+            this.drops.splice(i, 1);
+            this.net.dropGone(d.uid);
+            this.collect(d.id, d.n);
           }
-          if (left > 0) d.n = left; else this.drops.splice(i, 1);
         }
       }
     }
-    if (pick) { this.audio.play('pickup'); checkQuests(this); }
   }
 
   // ── 파티클 ──
@@ -637,34 +740,39 @@ export class Game {
     for (let l = 0; l < 2; l++) {
       for (const [i, e] of w.ents[l]) {
         if (e.type !== 'furnace') continue;
-        const [src, fuel, out] = e.slots;
-        const rec = src ? SMELT[src.id] : null;
-        const can = !!rec && (!out || (out.id === rec.out && out.n < maxStack(rec.out)));
-        if (e.burn <= 0 && can && fuel && ITEMS[fuel.id].fuel) {
-          e.burn = e.burnMax = ITEMS[fuel.id].fuel;
-          fuel.n--; if (fuel.n <= 0) e.slots[1] = null;
-          e.touched = true;
-        }
-        const lit = e.burn > 0;
-        if (lit) {
-          e.burn -= dt;
-          if (can) {
-            e.prog += dt;
-            if (e.prog >= rec.time) {
-              e.prog = 0;
-              src.n--; if (src.n <= 0) e.slots[0] = null;
-              if (e.slots[2]) e.slots[2].n++; else e.slots[2] = { id: rec.out, n: 1 };
-              this.stats.smelted[rec.out] = (this.stats.smelted[rec.out] || 0) + 1;
-              e.touched = true;
-              checkQuests(this);
-              if (l === this.layer) this.audio.play('smelt', { at: [i % MAP_W, (i / MAP_W) | 0] });
-            }
-          } else e.prog = 0;
-        } else if (e.prog > 0) e.prog = Math.max(0, e.prog - dt * 2);
-        const x = i % MAP_W, y = (i / MAP_W) | 0;
-        if ((w.layers[l].meta[i] === 1) !== lit) w.setMeta(l, x, y, lit ? 1 : 0);
+        if (e.owner && e.owner !== this.net.id) continue;      // 손님이 열어 둔 화로는 그 손님이 돌리는 중
+        this.tickFurnace(l, i, e, dt);
       }
     }
+  }
+  tickFurnace(l, i, e, dt) {
+    const w = this.world;
+    const [src, fuel, out] = e.slots;
+    const rec = src ? SMELT[src.id] : null;
+    const can = !!rec && (!out || (out.id === rec.out && out.n < maxStack(rec.out)));
+    if (e.burn <= 0 && can && fuel && ITEMS[fuel.id].fuel) {
+      e.burn = e.burnMax = ITEMS[fuel.id].fuel;
+      fuel.n--; if (fuel.n <= 0) e.slots[1] = null;
+      e.touched = true;
+    }
+    const lit = e.burn > 0;
+    if (lit) {
+      e.burn -= dt;
+      if (can) {
+        e.prog += dt;
+        if (e.prog >= rec.time) {
+          e.prog = 0;
+          src.n--; if (src.n <= 0) e.slots[0] = null;
+          if (e.slots[2]) e.slots[2].n++; else e.slots[2] = { id: rec.out, n: 1 };
+          this.stats.smelted[rec.out] = (this.stats.smelted[rec.out] || 0) + 1;
+          e.touched = true;
+          checkQuests(this);
+          if (l === this.layer) this.audio.play('smelt');
+        }
+      } else e.prog = 0;
+    } else if (e.prog > 0) e.prog = Math.max(0, e.prog - dt * 2);
+    const x = i % MAP_W, y = (i / MAP_W) | 0;
+    if ((w.layers[l].meta[i] === 1) !== lit) w.setMeta(l, x, y, lit ? 1 : 0);
   }
 
   // ── 시야(지도에 밝혀진 곳) ──

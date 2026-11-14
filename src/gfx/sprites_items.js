@@ -1,6 +1,7 @@
 // 아이템 아이콘 + 플레이어 캐릭터 도트
 import { Pix, shade, mix } from './pix.js';
 import { mulberry32 } from '../rng.js';
+import { PLAYER_COLORS } from '../config.js';
 
 const K = 0x241a2b;
 
@@ -458,22 +459,26 @@ function buildPlayer(atlas) {
     ['....kbbBbbk.....', '...kbbk.kbbk....', '..kggk...kggk...', '..kkkk...kkkk...'],
     ['....kbbBbbk.....', '.....kbbbk......', '.....kgggk......', '.....kkkkk......'],
   ];
-  const compose = (body, legs, bob) => {
+  const compose = (body, legs, bob, cp) => {
     const p = new Pix(16, 20);
-    p.blit(art(legs, pal), 0, 16);
-    p.blit(art(body, pal), 0, bob);
+    p.blit(art(legs, cp), 0, 16);
+    p.blit(art(body, cp), 0, bob);
     return p;
   };
   // 걷기 4프레임: 서기 → 왼발 → 서기 → 오른발
   const seqFront = [[0, 0], [1, 1], [0, 0], [2, 1]];
   const seqSide = [[0, 0], [1, 1], [2, 0], [1, 1]];
-  for (let f = 0; f < 4; f++) {
-    atlas.add(`p_d_${f}`, compose(bodyD, legsFront[seqFront[f][0]], seqFront[f][1]), -8, -18);
-    atlas.add(`p_u_${f}`, compose(bodyU, legsFront[seqFront[f][0]], seqFront[f][1]), -8, -18);
-    const side = compose(bodyR, legsSide[seqSide[f][0]], seqSide[f][1]);
-    atlas.add(`p_r_${f}`, side, -8, -18);
-    atlas.add(`p_l_${f}`, side.flip(), -8, -18);
-  }
+  // 안전모 색만 바꿔 플레이어마다 한 벌씩 (이름: p{색번호}_{방향}_{프레임})
+  PLAYER_COLORS.forEach((col, c) => {
+    const cp = { ...pal, y: col, Y: mix(col, 0xffffff, 0.45), o: shade(col, 0.76) };
+    for (let f = 0; f < 4; f++) {
+      atlas.add(`p${c}_d_${f}`, compose(bodyD, legsFront[seqFront[f][0]], seqFront[f][1], cp), -8, -18);
+      atlas.add(`p${c}_u_${f}`, compose(bodyU, legsFront[seqFront[f][0]], seqFront[f][1], cp), -8, -18);
+      const side = compose(bodyR, legsSide[seqSide[f][0]], seqSide[f][1], cp);
+      atlas.add(`p${c}_r_${f}`, side, -8, -18);
+      atlas.add(`p${c}_l_${f}`, side.flip(), -8, -18);
+    }
+  });
 }
 
 export { mix };

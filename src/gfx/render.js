@@ -1,5 +1,5 @@
 // 월드 렌더러: 지형 → (행 단위 y정렬) 오브젝트·플레이어 → 조명 → 커서
-import { TILE, MAP_W, MAP_H, CAVE, WALL_LIFT, ROOF_LIFT } from '../config.js';
+import { TILE, MAP_W, MAP_H, CAVE, WALL_LIFT, ROOF_LIFT, PLAYER_COLORS } from '../config.js';
 import { GROUND } from '../data/ground.js';
 import { OBJ, O } from '../data/objects.js';
 import { ITEMS } from '../data/items.js';
@@ -68,8 +68,11 @@ export class Renderer {
     this.rim = { N: get('rim_N'), W: get('rim_W'), E: get('rim_E') };
     this.shadowS = get('shadow_S');
     this.cracks = [0, 1, 2, 3].map((s) => get('crack_' + s));
-    this.pl = {};
-    for (const d of ['d', 'u', 'l', 'r']) this.pl[d] = [0, 1, 2, 3].map((f) => get(`p_${d}_${f}`));
+    this.pl = PLAYER_COLORS.map((_, c) => {
+      const set = {};
+      for (const d of ['d', 'u', 'l', 'r']) set[d] = [0, 1, 2, 3].map((f) => get(`p${c}_${d}_${f}`));
+      return set;
+    });
     this.shadowP = get('shadow_p'); this.shadowD = get('shadow_s');
     this.icons = {};
     for (const id in ITEMS) this.icons[id] = get(ITEMS[id].icon);
@@ -171,6 +174,10 @@ export class Renderer {
       if (d.layer !== L || d.x < ox - 16 || d.x > ox + vw + 16 || d.y < oy - 16 || d.y > oy + vh + 32) continue;
       ents.push({ y: d.y, d });
     }
+    if (!title) for (const rp of game.net.players.values()) {
+      if (rp.layer !== L || rp.rx < ox - 24 || rp.rx > ox + vw + 24 || rp.ry < oy - 8 || rp.ry > oy + vh + 32) continue;
+      ents.push({ y: rp.ry, rp });
+    }
     ents.sort((a, b) => a.y - b.y);
     let ei = 0;
     const mn = game.mining, sh = game.shake;
@@ -266,8 +273,18 @@ export class Renderer {
       ctx.drawImage(this.img, s.x, s.y, s.w, s.h, x - 6, y - 11 - Math.round(d.z) + bob, 12, 12);
       return;
     }
+    if (e.rp) {       // 다른 플레이어
+      const r = e.rp, px = Math.round(r.rx) - ox, py = Math.round(r.ry) - oy;
+      const set = this.pl[r.color % this.pl.length], s = (set[r.dir] || set.d)[r.moving ? (r.anim | 0) % 4 : 0];
+      D(this.shadowP, px - 7, py - 2);
+      const sw = r.swingT > 0 && r.held && this.icons[r.held] ? { dir: set[r.dir] ? r.dir : 'd', swing: r.swingT } : null;
+      if (sw && sw.dir === 'u') this.drawSwing(sw, { id: r.held }, px, py);
+      D(s, px + s.ox, py + s.oy);
+      if (sw && sw.dir !== 'u') this.drawSwing(sw, { id: r.held }, px, py);
+      return;
+    }
     const p = game.player, px = Math.round(p.x) - ox, py = Math.round(p.y) - oy;
-    const s = this.pl[p.dir][p.moving ? (p.anim | 0) % 4 : 0];
+    const s = this.pl[game.net.color % this.pl.length][p.dir][p.moving ? (p.anim | 0) % 4 : 0];
     D(this.shadowP, px - 7, py - 2);
     const held = game.heldSlot(), swinging = p.swing > 0 && held;
     if (swinging && p.dir === 'u') this.drawSwing(p, held, px, py);
@@ -307,6 +324,11 @@ export class Renderer {
     const p = game.player, held = game.heldDef();
     const pr = held && held.light ? held.light : L === CAVE ? 6.2 : 4;
     lights.push([p.x, p.y - 8, pr, held && held.light ? 'warm' : 'day', 1]);
+    for (const rp of game.net.players.values()) {
+      if (rp.layer !== L) continue;
+      const hl = rp.held && ITEMS[rp.held] && ITEMS[rp.held].light;
+      lights.push([rp.rx, rp.ry - 8, hl || (L === CAVE ? 6.2 : 4), hl ? 'warm' : 'day', 1]);
+    }
     const m = 7;
     for (let y = Math.max(0, y0 - m); y <= Math.min(MAP_H - 1, y1 + m); y++) for (let x = Math.max(0, x0 - m); x <= Math.min(MAP_W - 1, x1 + m); x++) {
       const i = y * MAP_W + x, o = Lr.obj[i];

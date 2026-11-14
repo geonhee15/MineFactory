@@ -8,6 +8,7 @@ const N = MAP_W * MAP_H;
 export class World {
   constructor(seed) {
     this.seed = seed >>> 0;
+    this.id = '';                         // 세계 고유 번호 (멀티플레이 손님이 자기 가방을 이 번호로 기억한다)
     this.w = MAP_W; this.h = MAP_H;
     const mk = () => ({
       ground: new Uint8Array(N), obj: new Uint8Array(N), meta: new Uint8Array(N), seen: new Uint8Array(N),

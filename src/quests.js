@@ -13,7 +13,7 @@ export const QUESTS = [
   { title: '동굴 탐험', desc: '미니맵의 노란 화살표를 따라 동굴 입구를 찾아 우클릭으로 들어가세요.', done: (g) => !!g.stats.flags.cave },
   { title: '석탄과 횃불', desc: '지하에서 석탄(검은 점이 박힌 돌)을 캐서 횃불을 만드세요.', done: (g) => crafted(g, 'torch') >= 1 },
   { title: '화로 설치', desc: '제작대에서 돌 8개로 화로를 만들어 설치하세요.', done: (g) => placed(g, 'furnace') >= 1 },
-  { title: '철 제련', desc: '화로에 철광석과 연료(석탄·나무)를 넣어 철 주괴를 만드세요.', done: (g) => (g.stats.smelted.iron_ingot || 0) >= 1 },
+  { title: '철 제련', desc: '화로에 철광석과 연료(석탄·나무)를 넣어 철 주괴를 만드세요.', done: (g) => (g.stats.smelted.iron_ingot || 0) >= 1 || g.inv.count('iron_ingot') > 0 },
   { title: '철 곡괭이', desc: '철 주괴 3개와 막대기 2개로 철 곡괭이를 만드세요.', done: (g) => crafted(g, 'iron_pickaxe') >= 1 },
   { title: '농사 짓기', desc: '괭이로 풀밭을 갈고 밀 씨앗(수풀에서 나와요)을 심어, 밀 3개를 수확하세요.', done: (g) => got(g, 'wheat') >= 3, prog: (g) => [got(g, 'wheat'), 3] },
   { title: '든든한 한 끼', desc: '제작대에서 밀 3개로 빵을 구우세요.', done: (g) => crafted(g, 'bread') >= 1 },

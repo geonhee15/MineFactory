@@ -10,4 +10,6 @@ export const INV_SIZE = 36;        // 0~8 단축바, 9~35 가방
 export const HOTBAR = 9;
 export const SAVE_VERSION = 1;
 export const WALL_LIFT = 6;        // 벽 블록이 위로 솟아 보이는 높이(px)
+// 플레이어 안전모 색 (멀티플레이에서 방장이 0번, 손님은 들어온 순서대로)
+export const PLAYER_COLORS = [0xf4c430, 0xe2504a, 0x4a8fe0, 0x58b548, 0x9a5fd6, 0xf08a2e, 0x3fc7c7, 0xf07ab0];
 export const ROOF_LIFT = 12;       // 지붕이 떠 보이는 높이(px) — 남쪽 벽과 문이 지붕 아래로 보이도록 벽보다 높다

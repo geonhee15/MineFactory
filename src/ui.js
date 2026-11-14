@@ -1,11 +1,13 @@
 // DOM 기반 UI: HUD, 단축바, 가방·제작·화로·상자 창, 지도, 타이틀·일시정지 메뉴
-import { MAP_W, MAP_H, TILE, CAVE, HOTBAR } from './config.js';
+import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH } from './config.js';
 import { GROUND } from './data/ground.js';
 import { OBJ, FLAG_COLORS } from './data/objects.js';
 import { hex } from './gfx/pix.js';
 import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES } from './data/items.js';
 import { maxStack } from './inventory.js';
 import { QUESTS } from './quests.js';
+import { loadSave, listBackups, loadBackup, exportBlob, importFile, fileName, storageInfo, serialize } from './save.js';
+import { MAX_PLAYERS } from './net.js';
 
 const N = MAP_W * MAP_H;
 const el = (tag, cls, html) => {
@@ -17,6 +19,18 @@ const el = (tag, cls, html) => {
 const MINI = 78;
 const ROOF_COLOR = 0xa8503a;
 const flagHex = (m) => hex(FLAG_COLORS[m % FLAG_COLORS.length].c);
+const playerHex = (c) => hex(PLAYER_COLORS[c % PLAYER_COLORS.length]);
+const when = (ts) => { const d = new Date(ts), p = (n) => String(n).padStart(2, '0'); return `${d.getMonth() + 1}월 ${d.getDate()}일 ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const REASON = { auto: '자동', new: '새 게임 시작 전', restore: '되돌리기 전', import: '파일 불러오기 전' };
+const JOIN_ERR = {
+  'peer-unavailable': '그 코드의 방을 찾지 못했어요. 코드를 다시 확인해 주세요.',
+  full: `방이 가득 찼어요. (최대 ${MAX_PLAYERS}명)`,
+  version: '게임 버전이 서로 달라요. 둘 다 새로고침한 뒤 다시 해 보세요.',
+  timeout: '연결하지 못했어요. 회사·학교 같은 일부 네트워크에서는 직접 연결이 막힐 수 있어요.',
+  closed: '방장과의 연결이 끊어졌어요.',
+  lib: '멀티플레이 모듈을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.',
+};
+const joinErr = (e) => JOIN_ERR[e && e.type] || '중계 서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.';
 
 export class UI {
   constructor(root, atlas, audio) {
@@ -26,13 +40,14 @@ export class UI {
     this.mode = null; this.ent = null; this.held = null;
     this.views = []; this.recViews = []; this.hotViews = [];
     this.titleOpen = true; this.pauseOpen = false; this.mapOpen = false; this.helpOpen = false; this.confirmOpen = false;
+    this.panel = null; this.chatOpen = false; this.labels = new Map();
     this.cache = {}; this.mouse = { x: 0, y: 0 }; this.tipFor = null;
     this.mapAcc = 9; this.miniAcc = 9; this.nameT = 0; this.bannerT = 0;
     this.on = {};
     this.build();
   }
   attach(game, renderer) { this.game = game; this.renderer = renderer; }
-  get blocking() { return !!this.mode || this.titleOpen || this.pauseOpen || this.mapOpen || this.helpOpen || this.confirmOpen; }
+  get blocking() { return !!this.mode || this.titleOpen || this.pauseOpen || this.mapOpen || this.helpOpen || this.confirmOpen || !!this.panel || this.chatOpen; }
   icon(id) { return ITEMS[id] ? this.atlas.url(ITEMS[id].icon) : ''; }
   $(id) { return this.root.querySelector('#' + id); }
 
@@ -46,7 +61,10 @@ export class UI {
           <div class="bar" id="hungerbar"><i></i></div>
         </div>
         <div id="quest"></div>
-        <div id="mini"><canvas width="${MINI}" height="${MINI}"></canvas><div id="coords"></div></div>
+        <div id="mini"><canvas width="${MINI}" height="${MINI}"></canvas><div id="coords"></div><div id="room" class="hidden"></div></div>
+        <div id="names"></div>
+        <div id="chat"></div>
+        <input id="chatin" class="hidden" maxlength="120" placeholder="메시지를 쓰고 Enter (취소: Esc)" autocomplete="off">
         <div id="hints"><b>WASD</b> 이동 · <b>좌클릭</b> 캐기/놓기 · <b>우클릭</b> 사용/먹기<br><b>E</b> 가방·제작 · <b>M</b> 지도 · <b>Q</b> 버리기 · <b>Esc</b> 메뉴</div>
         <div id="pickups"></div>
         <div id="prompt" class="hidden"></div>
@@ -70,17 +88,19 @@ export class UI {
           <button class="btn primary hidden" id="b-continue">이어하기</button>
           <button class="btn" id="b-new">새 게임</button>
           <div class="seedrow"><span>시드</span><input id="seed" placeholder="비워 두면 무작위" maxlength="18" spellcheck="false"></div>
-          <button class="btn small" data-act="help">조작법</button>
+          <button class="btn" data-act="join">친구 방에 참가</button>
+          <div class="row2"><button class="btn small" data-act="saves">세이브 관리</button><button class="btn small" data-act="help">조작법</button></div>
         </div>
-        <div id="foot">v0.1 · 지상과 지하 · 소리를 켜고 즐겨 주세요</div>
+        <div id="foot">v0.2 · 지상과 지하 · 멀티플레이 · 소리를 켜고 즐겨 주세요</div>
       </div>
       <div id="pause" class="hidden"><div class="shade"></div>
         <div class="panel center" style="width:310px">
-          <div class="title-bar"><h2>일시정지</h2></div>
+          <div class="title-bar"><h2 id="pause-title">일시정지</h2></div>
           <div class="menu" style="width:auto">
             <button class="btn primary" id="p-resume">계속하기</button>
             <button class="btn" id="p-save">저장하기</button>
-            <button class="btn" data-act="help">조작법</button>
+            <button class="btn" data-act="mp">멀티플레이</button>
+            <div class="row2"><button class="btn small" data-act="saves" id="p-saves">세이브 관리</button><button class="btn small" data-act="help">조작법</button></div>
             <div class="vol"><span>효과음</span><input type="range" id="v-sfx" min="0" max="100"><span id="v-sfx-t"></span></div>
             <div class="vol"><span>음악</span><input type="range" id="v-music" min="0" max="100"><span id="v-music-t"></span></div>
             <button class="btn small" id="p-title" style="margin-top:8px">저장하고 타이틀로</button>
@@ -103,6 +123,29 @@ export class UI {
             <kbd>Esc</kbd><span>창 닫기 · 일시정지</span>
           </div>
           <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.</div>
+        </div>
+      </div>
+      <div id="join" class="hidden"><div class="shade"></div>
+        <div class="panel center" style="width:350px;max-width:92vw">
+          <div class="title-bar"><h2>친구 방에 참가</h2><button class="x" data-act="close">✕</button></div>
+          <label class="field"><span>내 이름</span><input id="j-name" maxlength="12" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span>방 코드</span><input id="j-code" maxlength="6" placeholder="6글자" spellcheck="false" autocomplete="off" style="text-transform:uppercase;letter-spacing:4px"></label>
+          <button class="btn primary" id="j-go" style="width:100%;margin-top:10px">참가하기</button>
+          <div id="j-status" class="status"></div>
+          <div class="note">방장이 알려 준 코드를 넣으면 방장의 세계로 들어갑니다.<br>세계는 방장의 것이고, 내 가방과 진행도는 이 브라우저에 따로 저장돼요.</div>
+        </div>
+      </div>
+      <div id="mp" class="hidden"><div class="shade"></div>
+        <div class="panel center" style="width:370px;max-width:92vw">
+          <div class="title-bar"><h2>멀티플레이</h2><button class="x" data-act="close">✕</button></div>
+          <div id="mp-body"></div>
+        </div>
+      </div>
+      <div id="saves" class="hidden"><div class="shade"></div>
+        <div class="panel center" style="width:470px;max-width:94vw">
+          <div class="title-bar"><h2>세이브 관리</h2><button class="x" data-act="close">✕</button></div>
+          <div id="saves-body"></div>
+          <input type="file" id="s-file" accept=".mfsave" class="hidden">
         </div>
       </div>
       <div id="confirm" class="hidden"><div class="shade"></div>
@@ -136,9 +179,26 @@ export class UI {
       const b = e.target.closest('[data-act]');
       if (!b) return;
       this.audio.play('click');
-      if (b.dataset.act === 'help') this.toggle('help');
-      if (b.dataset.act === 'map') this.toggle('map');
+      const act = b.dataset.act;
+      if (act === 'help') this.toggle('help');
+      if (act === 'map') this.toggle('map');
+      if (act === 'close') this.showPanel(null);
+      if (act === 'join' || act === 'saves' || act === 'mp') { this.audio.unlock(); this.showPanel(act); }
     });
+    this.$('j-go').addEventListener('click', () => {
+      this.audio.unlock(); this.audio.play('click');
+      const code = this.$('j-code').value.trim().toUpperCase();
+      if (code.length < 4) { this.joinStatus('방 코드를 입력해 주세요.', true); return; }
+      if (this.on.join) this.on.join(this.$('j-name').value, code);
+    });
+    this.$('j-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') this.$('j-go').click(); });
+    this.$('s-file').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) this.importSave(f); });
+    const ci = this.$('chatin');
+    ci.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) this.closeChat(true);
+      else if (e.key === 'Escape') this.closeChat(false);
+    });
+    ci.addEventListener('blur', () => { if (this.chatOpen) this.closeChat(false); });
     const click = (id, fn) => this.$(id).addEventListener('click', () => { this.audio.unlock(); this.audio.play('click'); fn(); });
     click('b-continue', () => this.on.continue && this.on.continue());
     click('b-new', () => this.on.new && this.on.new(this.$('seed').value.trim()));
@@ -162,7 +222,7 @@ export class UI {
     document.getElementById('game').addEventListener('mousedown', () => {
       if (this.mode && this.held) {
         const p = this.game.player;
-        this.game.spawnDrop(this.held.id, this.held.n, p.x, p.y - 4).t = -1;
+        this.game.spawnDrop(this.held.id, this.held.n, p.x, p.y - 4, { t: -1 });
         this.held = null; this.dirty = true;
       }
     });
@@ -350,8 +410,10 @@ export class UI {
       if (left > 0) this.game.spawnDrop(this.held.id, left, this.game.player.x, this.game.player.y - 4);
       this.held = null;
     }
+    const ent = this.ent, wasEnt = this.mode === 'chest' || this.mode === 'furnace';
     this.win.remove(); this.win = null;
     this.mode = null; this.ent = null; this.views = []; this.recViews = [];
+    if (wasEnt) this.game.entClosed(ent);
     this.hideTip(); this.dirty = true;
     if (!silent) this.audio.play('close');
   }
@@ -435,6 +497,8 @@ export class UI {
   // ── 화면 전환 ──
   showTitle(hasSave) {
     this.close(true);
+    this.showPanel(null); if (this.chatOpen) this.closeChat(false);
+    this.$('chat').innerHTML = ''; for (const lab of this.labels.values()) lab.remove(); this.labels.clear();
     this.titleOpen = true; this.pauseOpen = false; this.mapOpen = false;
     this.$('title').classList.remove('hidden'); this.$('pause').classList.add('hidden'); this.$('mapview').classList.add('hidden');
     this.hud.classList.add('hidden');
@@ -447,13 +511,139 @@ export class UI {
     this.$('title').classList.add('hidden'); this.hud.classList.remove('hidden');
     this.dirty = true; this.cache = {};
     for (const v of this.hotViews) v.key = '?';
+    this.showPanel(null);
+    this.netChanged();
   }
   loading(on) { this.$('loading').classList.toggle('hidden', !on); }
   togglePause(on = !this.pauseOpen) {
     if (this.titleOpen) return;
     this.pauseOpen = on; this.game.paused = on;
     this.$('pause').classList.toggle('hidden', !on);
-    if (on) this.game.save();
+    if (!on) this.showPanel(null);
+    if (on) { this.netChanged(); this.game.save(); }
+  }
+
+  // ── 패널: 방 참가 · 멀티플레이 · 세이브 관리 ──
+  showPanel(name) {
+    for (const n of ['join', 'mp', 'saves']) this.$(n).classList.toggle('hidden', n !== name);
+    this.panel = name;
+    if (name === 'join') { this.$('j-name').value = this.game.net.name; this.joinStatus(''); setTimeout(() => this.$('j-code').focus(), 30); }
+    if (name === 'mp') this.renderMp();
+    if (name === 'saves') this.renderSaves();
+  }
+  joinStatus(text, bad) { const e = this.$('j-status'); e.textContent = text; e.classList.toggle('bad', !!bad); }
+  joinFailed(e) { this.joinStatus(joinErr(e), true); this.audio.play('deny'); }
+  // 접속 상태가 바뀔 때마다 화면의 관련 표시를 맞춘다
+  netChanged() {
+    const net = this.game.net, room = this.$('room');
+    room.classList.toggle('hidden', !net.on);
+    if (net.on) room.textContent = `방 ${net.code} · ${net.count}명`;
+    this.$('p-title').textContent = net.isGuest ? '방 나가기' : '저장하고 타이틀로';
+    this.$('p-saves').classList.toggle('hidden', net.isGuest);
+    this.$('pause-title').textContent = net.on ? '메뉴 (게임은 계속 흘러가요)' : '일시정지';
+    if (this.panel === 'mp') this.renderMp();
+  }
+  renderMp() {
+    const net = this.game.net, box = this.$('mp-body');
+    box.innerHTML = '';
+    const list = () => {
+      const ul = el('div', 'plist');
+      const row = (name, color, tag) => { const r = el('div', 'prow'); const sw = el('i'); sw.style.background = playerHex(color); const nm = el('span'); nm.textContent = name; r.append(sw, nm); if (tag) r.append(el('em', '', tag)); ul.append(r); };
+      row(net.name, net.color, net.isHost ? '나 · 방장' : '나');
+      for (const p of net.players.values()) row(p.name, p.color, p.id === 'host' || p.color === 0 ? '방장' : '');
+      return ul;
+    };
+    if (!net.on) {
+      box.append(el('div', 'note first', '지금 이 세계에 친구를 초대할 수 있어요. 방을 열면 6글자 코드가 나오고, 친구는 타이틀 화면의 <b>친구 방에 참가</b>에서 그 코드를 넣으면 됩니다.'));
+      const f = el('label', 'field', '<span>내 이름</span>'); const inp = el('input'); inp.maxLength = 12; inp.value = net.name; inp.spellcheck = false; f.append(inp);
+      const go = el('button', 'btn primary', '방 열기'); go.style.cssText = 'width:100%;margin-top:10px';
+      const st = el('div', 'status');
+      go.addEventListener('click', async () => {
+        this.audio.play('click'); net.setName(inp.value); go.disabled = true; st.classList.remove('bad'); st.textContent = '방을 여는 중…';
+        try { await net.openRoom(); this.audio.play('quest'); this.toast(`방을 열었어요. 코드: ${net.code}`, 'good'); this.netChanged(); }
+        catch (e) { go.disabled = false; st.classList.add('bad'); st.textContent = joinErr(e); this.audio.play('deny'); }
+      });
+      box.append(f, go, st, el('div', 'note', `최대 ${MAX_PLAYERS}명. 서버 없이 서로의 브라우저가 직접 연결돼요. 세계는 내 기기에 저장되고, 내가 게임을 닫으면 방도 닫혀요. 일부 네트워크(회사·학교 등)에서는 연결이 안 될 수 있어요.`));
+    } else if (net.isHost) {
+      box.append(el('div', 'cat', '방 코드'), el('div', 'code', net.code));
+      const copy = el('button', 'btn small', '초대 링크 복사'); copy.style.width = '100%';
+      copy.addEventListener('click', async () => {
+        this.audio.play('click');
+        try { await navigator.clipboard.writeText(net.link()); this.toast('초대 링크를 복사했어요', 'good'); }
+        catch { this.toast(`복사하지 못했어요. 코드 ${net.code} 를 직접 알려 주세요`); }
+      });
+      const close = el('button', 'btn small', '방 닫기'); close.style.cssText = 'width:100%;margin-top:8px';
+      close.addEventListener('click', () => { this.audio.play('click'); net.closeRoom(); this.toast('방을 닫았어요'); });
+      box.append(copy, el('div', 'cat', `함께 있는 사람 (${net.count}/${MAX_PLAYERS})`), list(), close, el('div', 'note', '<b>Enter</b> 키로 대화할 수 있어요. 상자와 화로는 한 번에 한 사람만 열 수 있습니다.'));
+    } else {
+      box.append(el('div', 'cat', '방 코드'), el('div', 'code', net.code), el('div', 'cat', `함께 있는 사람 (${net.count}/${MAX_PLAYERS})`), list(),
+        el('div', 'note', '이 세계는 방장의 것이에요. 내 가방과 진행도는 이 브라우저에 저장되어, 같은 세계에 다시 들어오면 이어집니다.<br><b>Enter</b> 키로 대화할 수 있어요.'));
+    }
+  }
+  download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  async renderSaves() {
+    const box = this.$('saves-body'), g = this.game, playing = g.state === 'play' && !g.net.isGuest;
+    box.innerHTML = '<div class="note first">불러오는 중…</div>';
+    if (playing) await g.save();
+    const [cur, baks, info] = await Promise.all([loadSave(), listBackups(), storageInfo()]);
+    if (this.panel !== 'saves') return;
+    box.innerHTML = '';
+    const row = (title, sub, buttons) => {
+      const r = el('div', 'srow'), t = el('div', 'stxt');
+      t.append(el('div', '', title), el('div', 'sub', sub));
+      const bs = el('div', 'sbtn');
+      for (const [label, fn, cls] of buttons) { const b = el('button', 'btn small' + (cls ? ' ' + cls : ''), label); b.addEventListener('click', () => { this.audio.play('click'); fn(b); }); bs.append(b); }
+      r.append(t, bs); box.append(r);
+    };
+    const exportOf = (getData) => async (btn) => {
+      btn.disabled = true;
+      try { const d = await getData(); this.download(await exportBlob(d), fileName(d)); this.toast('세이브 파일을 내려받았어요', 'good'); }
+      catch (e) { console.warn(e); this.toast('파일을 만들지 못했어요'); }
+      btn.disabled = false;
+    };
+    box.append(el('div', 'cat', '지금 세이브'));
+    if (cur) row(`${Math.floor(cur.time / DAY_LENGTH) + 1}일차`, `${when(cur.savedAt)} 저장`, [['파일로 내보내기', exportOf(async () => (playing ? serialize(g) : cur)), 'primary']]);
+    else box.append(el('div', 'note first', '아직 저장된 세계가 없어요.'));
+    box.append(el('div', 'cat', `자동 백업 (최근 ${baks.length}개 · 10분마다, 그리고 덮어쓰기 직전에)`));
+    if (!baks.length) box.append(el('div', 'note first', '아직 백업이 없어요. 플레이하면 자동으로 쌓입니다.'));
+    for (const b of baks) {
+      row(`${b.day}일차 <span class="tag">${REASON[b.reason] || b.reason}</span>`, when(b.at), [
+        ['되돌리기', () => this.confirm(`${when(b.at)}의 백업(${b.day}일차)으로 되돌릴까요?<br>지금 세이브는 백업으로 옮겨 둡니다.`, async () => { const d = await loadBackup(b.key); if (d && this.on.restore) this.on.restore(d, 'restore'); })],
+        ['파일', exportOf(() => loadBackup(b.key))],
+      ]);
+    }
+    const imp = el('button', 'btn small', '세이브 파일(.mfsave)에서 불러오기'); imp.style.cssText = 'width:100%;margin-top:12px';
+    imp.addEventListener('click', () => { this.audio.play('click'); this.$('s-file').click(); });
+    box.append(imp, el('div', 'note', `세이브는 쿠키가 아니라 이 브라우저의 저장소(IndexedDB)에 들어 있어요. 브라우저에서 사이트 데이터를 지우거나 다른 기기로 옮기면 따라오지 않으니, <b>아끼는 세계는 파일로 내보내</b> 두세요. 파일은 어느 컴퓨터·브라우저에서든 다시 불러올 수 있습니다.<br>브라우저 보호 저장: <b>${info.persisted ? '켜짐' : '꺼짐'}</b>${info.persisted ? '' : ' (브라우저가 허용하면 자동으로 켜져요)'} · 사용 중 ${(info.usage / 1048576).toFixed(1)}MB`));
+  }
+  async importSave(file) {
+    try {
+      const d = await importFile(file);
+      this.confirm(`세이브 파일의 세계(${Math.floor(d.time / DAY_LENGTH) + 1}일차, ${when(d.savedAt)} 저장)를 불러올까요?<br>지금 세이브는 백업으로 옮겨 둡니다.`, () => { if (this.on.restore) this.on.restore(d, 'import'); });
+    } catch (e) { console.warn(e); this.toast('마인 팩토리 세이브 파일이 아니거나 손상됐어요'); this.audio.play('deny'); }
+  }
+
+  // ── 대화 ──
+  chatLine(name, color, text) {
+    const box = this.$('chat'), e = el('div', 'cl');
+    if (name) { const n = el('b'); n.textContent = name; n.style.color = playerHex(color); e.append(n, document.createTextNode(' ' + text)); this.audio.play('select'); }
+    else { e.classList.add('sys'); e.textContent = text; }
+    box.append(e);
+    while (box.children.length > 8) box.firstChild.remove();
+    setTimeout(() => { e.style.opacity = 0; setTimeout(() => e.remove(), 500); }, 14000);
+  }
+  openChat() { const i = this.$('chatin'); i.classList.remove('hidden'); i.value = ''; this.chatOpen = true; setTimeout(() => i.focus(), 0); }
+  closeChat(send) {
+    const i = this.$('chatin');
+    if (!this.chatOpen) return;
+    this.chatOpen = false;
+    if (send) this.game.net.chat(i.value);
+    i.classList.add('hidden'); i.blur();
   }
   toggle(what) {
     if (what === 'help') { this.helpOpen = !this.helpOpen; this.$('help').classList.toggle('hidden', !this.helpOpen); }
@@ -473,12 +663,14 @@ export class UI {
     if (inp.hit('Escape')) {
       if (this.helpOpen) this.toggle('help');
       else if (this.confirmOpen) { this.confirmOpen = false; this.$('confirm').classList.add('hidden'); }
+      else if (this.panel) this.showPanel(null);
       else if (this.titleOpen) { /* 타이틀에서는 아무 것도 하지 않는다 */ }
       else if (this.mode) this.close();
       else if (this.mapOpen) this.toggle('map');
       else this.togglePause();
     }
-    if (this.titleOpen || this.pauseOpen || this.helpOpen || this.confirmOpen || g.state !== 'play') return;
+    if (this.titleOpen || this.pauseOpen || this.helpOpen || this.confirmOpen || this.panel || g.state !== 'play') return;
+    if (inp.hit('Enter') && g.net.on && !this.blocking) { this.openChat(); return; }
     if (inp.hit('KeyE') || inp.hit('Tab')) { if (this.mode) this.close(); else if (!this.mapOpen) this.open('inventory'); }
     if (inp.hit('KeyM') && !this.mode) this.toggle('map');
   }
@@ -534,6 +726,13 @@ export class UI {
       const k = (half - 7) / Math.max(Math.abs(dx), Math.abs(dy));
       this.arrowIcon(c, Math.round(half + dx * k), Math.round(half + dy * k), Math.atan2(dy, dx), flagHex(m));
     }
+    // 함께 있는 플레이어: 범위 안이면 안전모 색 점, 멀면 흰 테두리 화살표
+    for (const q of g.net.players.values()) {
+      if (q.layer !== L) continue;
+      const dx = Math.floor(q.rx / TILE) - px, dy = Math.floor(q.ry / TILE) - py, m = Math.max(Math.abs(dx), Math.abs(dy));
+      if (m <= half - 3) { c.fillStyle = '#ffffff'; c.fillRect(half + dx - 2, half + dy - 2, 5, 5); c.fillStyle = playerHex(q.color); c.fillRect(half + dx - 1, half + dy - 1, 3, 3); }
+      else { const k = (half - 7) / m; this.arrowIcon(c, Math.round(half + dx * k), Math.round(half + dy * k), Math.atan2(dy, dx), playerHex(q.color), '#ffffff'); }
+    }
     c.fillStyle = '#241a2b'; c.fillRect(half - 2, half - 2, 5, 5);
     c.fillStyle = '#ffffff'; c.fillRect(half - 1, half - 1, 3, 3);
   }
@@ -545,10 +744,10 @@ export class UI {
     c.fillStyle = 'rgba(255,255,255,0.35)'; c.fillRect(x + 1, y - 8, 6, 1);
   }
   // 깃발 쪽을 가리키는 작은 화살표 (도트가 뭉개지지 않게 픽셀 단위로 찍는다)
-  arrowIcon(c, cx, cy, ang, color) {
+  arrowIcon(c, cx, cy, ang, color, edge = '#241a2b') {
     const dx = Math.cos(ang), dy = Math.sin(ang);
     for (let pass = 0; pass < 2; pass++) {
-      c.fillStyle = pass ? color : '#241a2b';
+      c.fillStyle = pass ? color : edge;
       const gr = pass ? 0 : 1.1;
       for (let y = -7; y <= 7; y++) for (let x = -7; x <= 7; x++) {
         const al = x * dx + y * dy, pe = Math.abs(y * dx - x * dy);
@@ -569,6 +768,11 @@ export class UI {
     }
     const meta = g.world.layers[L].meta;
     for (const i of g.world.flags[L]) this.flagIcon(c, i % MAP_W, (i / MAP_W) | 0, flagHex(meta[i]));
+    for (const q of g.net.players.values()) {
+      if (q.layer !== L) continue;
+      const qx = Math.floor(q.rx / TILE), qy = Math.floor(q.ry / TILE);
+      c.fillStyle = '#ffffff'; c.fillRect(qx - 4, qy - 4, 9, 9); c.fillStyle = playerHex(q.color); c.fillRect(qx - 3, qy - 3, 7, 7);
+    }
     const px = Math.floor(g.player.x / TILE), py = Math.floor(g.player.y / TILE);
     const b = ((performance.now() / 300) | 0) % 2;
     c.fillStyle = '#241a2b'; c.fillRect(px - 4, py - 4, 9, 9);
@@ -617,6 +821,19 @@ export class UI {
     const px = Math.floor(g.player.x / TILE), py = Math.floor(g.player.y / TILE);
     set('coords', px + ',' + py, () => { this.$('coords').textContent = `X ${px} · Y ${py}`; });
 
+    // 다른 플레이어 이름표
+    {
+      const net = g.net, r = this.renderer, box = this.$('names');
+      for (const [id, lab] of this.labels) if (!net.players.has(id)) { lab.remove(); this.labels.delete(id); }
+      for (const q of net.players.values()) {
+        let lab = this.labels.get(q.id);
+        if (!lab) { lab = el('div', 'nm'); lab.textContent = q.name; lab.style.borderColor = playerHex(q.color); box.append(lab); this.labels.set(q.id, lab); }
+        const sx = (q.rx - r.ox) * r.zoom, sy = (q.ry - 21 - r.oy) * r.zoom;
+        const vis = q.layer === g.layer && sx > -60 && sx < innerWidth + 60 && sy > 0 && sy < innerHeight + 30;
+        lab.style.display = vis ? '' : 'none';
+        if (vis) lab.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
+      }
+    }
     // 화로 게이지
     if (this.mode === 'furnace' && this.ent) {
       const e = this.ent, rec = e.slots[0] ? SMELT[e.slots[0].id] : null;

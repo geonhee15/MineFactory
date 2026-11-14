@@ -6,7 +6,7 @@ import { Input } from './input.js';
 import { AudioSys } from './audio.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
-import { loadSave, deleteSave, serialize } from './save.js';
+import { loadSave, shelve, backup, writeSave, serialize } from './save.js';
 
 const canvas = document.getElementById('game');
 const atlas = buildSprites();
@@ -50,10 +50,21 @@ function startPlay() {
   ui.hideTitle();
   game.updateSeen();
 }
+// 타이틀 화면으로: 배경용 세계를 새로 만들고 저장 상태를 다시 읽는다
+async function toTitle(keepWorld) {
+  ui.togglePause(false);
+  game.state = 'title';
+  if (!keepWorld) { game.newWorld(randomSeed()); freshWorld = true; }
+  game.layer = 0;           // 타이틀 배경은 항상 지상
+  save = await loadSave();
+  audio.setScene('title');
+  ui.showTitle(!!save);
+}
 
 ui.on.new = (seedStr) => {
   const go = async () => {
-    if (save) { try { await deleteSave(); } catch (e) { console.warn(e); } save = null; }
+    // 이전 세계는 지우지 않고 백업으로 옮겨 둔다 (세이브 관리에서 되돌릴 수 있다)
+    if (save) { try { await shelve('new'); } catch (e) { console.warn(e); } save = null; }
     // 시드를 지정하지 않았다면 타이틀 화면에 보이던 바로 그 세계에서 시작한다
     if (seedStr || !freshWorld) {
       ui.loading(true);
@@ -66,7 +77,7 @@ ui.on.new = (seedStr) => {
     ui.toast('나무에 마우스를 대고 길게 눌러 보세요', 'good');
     game.save();
   };
-  if (save) ui.confirm('저장된 세계가 있어요.<br>새로 시작하면 이전 세계는 사라집니다.', go);
+  if (save) ui.confirm('저장된 세계가 있어요. 새로 시작할까요?<br>이전 세계는 백업으로 옮겨 두니, <b>세이브 관리</b>에서 되돌릴 수 있어요.', go);
   else go();
 };
 ui.on.continue = () => {
@@ -76,17 +87,46 @@ ui.on.continue = () => {
   ui.banner(`${game.day}일차`);
 };
 ui.on.title = async () => {
+  if (game.net.isGuest) { await game.save(); game.net.leave(); return toTitle(false); }
+  if (game.net.on) game.net.closeRoom();
   await game.save();
   save = serialize(game);
-  ui.togglePause(false);
-  game.state = 'title';
-  game.layer = 0;           // 타이틀 배경은 항상 지상
-  audio.setScene('title');
-  ui.showTitle(true);
+  return toTitle(true);
+};
+// 백업이나 세이브 파일로 되돌리기. 지금 세이브는 먼저 백업으로 옮긴다
+ui.on.restore = async (data, reason) => {
+  try {
+    if (game.state === 'play' && game.net.on) { if (game.net.isGuest) game.net.leave(); else game.net.closeRoom(); }
+    const cur = await loadSave();
+    if (cur) await backup(cur, reason);
+    await writeSave(data);
+    save = data;
+    game.loadFrom(data);
+    ui.togglePause(false);
+    startPlay();
+    ui.banner(`${game.day}일차`);
+    ui.toast('세계를 불러왔어요', 'good');
+  } catch (e) { console.warn(e); ui.toast('불러오지 못했어요'); }
+};
+// 친구 방에 참가
+ui.on.join = async (name, code) => {
+  game.net.setName(name);
+  ui.joinStatus('방장에게 연결하는 중…');
+  try {
+    await game.net.join(code, (p) => ui.joinStatus(`세계를 받는 중… ${Math.round(p * 100)}%`));
+    startPlay();
+    ui.banner('친구의 세계');
+    ui.toast('방에 들어왔어요. Enter 키로 대화할 수 있어요', 'good');
+    game.save();
+  } catch (e) { console.warn('참가 실패', e); ui.joinFailed(e); }
+};
+game.onDisconnected = () => {
+  ui.toast('방장과의 연결이 끊어졌어요. 내 가방은 저장했어요');
+  toTitle(false);
 };
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) game.save(); });
-window.addEventListener('beforeunload', () => { game.save(); });
+window.addEventListener('beforeunload', () => { game.save(); if (game.net.isGuest) game.net.leave(); else game.net.closeRoom(); });
 
 let last = performance.now();
 function frame(now) {
@@ -115,5 +155,8 @@ function frame(now) {
   freshWorld = true;
   game.state = 'title';
   ui.showTitle(!!save);
+  // 초대 링크(?join=코드)로 들어왔으면 참가 창을 바로 띄운다
+  const code = new URLSearchParams(location.search).get('join');
+  if (code) { ui.showPanel('join'); ui.$('j-code').value = code.toUpperCase().slice(0, 6); }
   requestAnimationFrame(frame);
 })();
