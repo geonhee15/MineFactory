@@ -46,14 +46,14 @@ item('egg', '달걀', '닭에게서 얻은 달걀. 언젠가 쓸모가 있을 �
 // ── 먹을 것 ──
 item('berry', '산딸기', '새콤달콤한 열매.', { food: 8 });
 item('apple', '사과', '아삭한 사과.', { food: 14 });
-item('carrot', '당근', '먹어도 되고, 경작지에 심어도 된다.', { food: 12, seed: { obj: O.CARROT } });
+item('carrot', '당근', '먹어도 되고, 경작지에 심어도 된다. 손에 들고 있으면 돼지가 따라온다.', { food: 12, seed: { obj: O.CARROT } });
 item('mushroom', '버섯', '구우면 더 맛있다.', { food: 7 });
 item('baked_mushroom', '구운 버섯', '고소하게 구운 버섯.', { food: 18 });
-item('wheat', '밀', '빵의 재료.');
+item('wheat', '밀', '빵의 재료. 손에 들고 있으면 소와 양이 따라온다.');
 item('bread', '빵', '든든한 한 끼.', { food: 35 });
 
 // ── 씨앗 · 묘목 · 식물 ──
-item('wheat_seed', '밀 씨앗', '괭이로 간 경작지에 심는다.', { seed: { obj: O.WHEAT } });
+item('wheat_seed', '밀 씨앗', '괭이로 간 경작지에 심는다. 손에 들고 있으면 닭이 따라온다.', { seed: { obj: O.WHEAT } });
 item('sapling_oak', '참나무 묘목', '풀밭이나 흙에 심으면 나무로 자란다.', { place: { obj: O.SAPLING, meta: 0, on: 'soil' }, fuel: 2 });
 item('sapling_pine', '소나무 묘목', '풀밭이나 흙에 심으면 나무로 자란다.', { place: { obj: O.SAPLING, meta: 1, on: 'soil' }, fuel: 2 });
 item('sapling_birch', '자작나무 묘목', '풀밭이나 흙에 심으면 나무로 자란다.', { place: { obj: O.SAPLING, meta: 2, on: 'soil' }, fuel: 2 });

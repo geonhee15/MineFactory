@@ -1,9 +1,9 @@
-// 동물: 풀밭을 돌아다니고, 맞으면 달아나고, 잡으면 아이템을 떨어뜨린다.
+// 동물: 풀밭을 돌아다니고, 좋아하는 먹이를 든 사람을 따라오고, 맞으면 달아나고, 잡으면 아이템을 떨어뜨린다.
 // 움직임은 세계의 주인(혼자 할 때의 나 / 방장)만 계산한다. 손님은 방장이 보내 주는
 // 가까운 동물들의 위치를 받아 부드럽게 따라 그리고, 때릴 때는 방장에게 부탁한다.
 import { TILE, MAP_W, MAP_H, SURFACE } from './config.js';
 import { G } from './data/ground.js';
-import { MOBS, MOB_KEYS } from './data/mobs.js';
+import { MOBS, MOB_KEYS, lures } from './data/mobs.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
@@ -11,6 +11,9 @@ const TARGET = 220;                // 세계 전체의 동물 수 목표
 const ACTIVE = 44 * TILE;          // 플레이어에게서 이만큼 안에 있는 동물만 움직인다
 const STREAM = 34 * TILE;          // 손님에게는 이만큼 안의 동물만 알려 준다
 const HEAR = 13 * TILE;            // 울음소리가 들리는 거리
+const LURE = 8 * TILE;             // 좋아하는 먹이를 든 사람을 알아보는 거리
+const FOLLOW_SPEED = 4;            // 따라올 때는 평소 걸음의 몇 배로 걷는가
+const FOLLOW_MAX = 66;             // 그래도 사람(72)보다는 조금 느리다: 계속 달리면 뒤처지므로 가끔 기다려 줘야 한다
 
 export class Mobs {
   constructor(game) {
@@ -120,12 +123,22 @@ export class Mobs {
   }
 
   // ── 매 프레임 ──
-  // 지상에 있는 플레이어들의 위치 (이 근처의 동물만 움직인다)
+  // 지상에 있는 플레이어들의 위치와 손에 든 것 (이 근처의 동물만 움직이고, 먹이를 든 사람은 동물이 따라온다)
   watchers() {
     const g = this.game, pts = [];
-    if (g.layer === SURFACE) pts.push({ x: g.player.x, y: g.player.y });
-    for (const q of g.net.players.values()) if (q.layer === SURFACE) pts.push({ x: q.x, y: q.y });
+    if (g.layer === SURFACE) { const s = g.heldSlot(); pts.push({ x: g.player.x, y: g.player.y, held: s ? s.id : '' }); }
+    for (const q of g.net.players.values()) if (q.layer === SURFACE) pts.push({ x: q.x, y: q.y, held: q.held || '' });
     return pts;
+  }
+  // 이 동물이 따라갈 사람: 좋아하는 먹이를 들고 가까이 있는 사람 가운데 가장 가까운 사람
+  leader(m, pts) {
+    let best = null, bd = LURE;
+    for (const q of pts) {
+      if (!q.held || !lures(m.k, q.held)) continue;
+      const d = Math.hypot(q.x - m.x, q.y - m.y);
+      if (d < bd) { bd = d; best = q; }
+    }
+    return best;
   }
   update(dt) {
     if (this.game.net.isGuest) return this.updateGuest(dt);
@@ -138,17 +151,29 @@ export class Mobs {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const m = this.list[i];
       if (!pts.some((q) => Math.abs(q.x - m.x) < ACTIVE && Math.abs(q.y - m.y) < ACTIVE)) { m.moving = false; continue; }
-      for (let s = 0; s < steps; s++) this.step(m, h);
+      const lead = this.leader(m, pts);
+      if (lead && m.state !== 'follow' && m.state !== 'flee') this.voice(m, 0.8);    // 먹이를 알아본 순간 한 번 운다
+      for (let s = 0; s < steps; s++) this.step(m, h, lead);
       m.rx = m.x; m.ry = m.y;
       this.chatter(m, total);
     }
   }
-  step(m, h) {
+  // lead: 따라갈 사람 (없으면 제멋대로 돌아다닌다)
+  step(m, h, lead) {
     const d = MOBS[m.k];
     if (m.hurt > 0) m.hurt -= h;
     m.t -= h;
     let vx = 0, vy = 0;
-    if (m.state === 'idle') {
+    if (!lead && m.state === 'follow') { m.state = 'idle'; m.t = rand(0.5, 2); }      // 먹이가 사라지면 그 자리에 멈춰 선다
+    if (lead && m.state !== 'flee') {
+      // 먹이를 든 사람 곁으로 간다. 여럿이 한 점에 겹치지 않게, 동물마다 조금씩 다른 자리를 노린다
+      const a = m.id * 2.399, tx = lead.x + Math.cos(a) * 13 - m.x, ty = lead.y + Math.sin(a) * 9 - m.y, dist = Math.hypot(tx, ty);
+      m.state = 'follow'; m.t = 0.5;
+      const sp = Math.min(FOLLOW_MAX, d.speed * FOLLOW_SPEED);
+      if (dist > 7) { m.ax = tx / dist; m.ay = ty / dist; vx = m.ax * sp; vy = m.ay * sp; }
+      else { m.ax = m.ay = 0; if (Math.abs(lead.x - m.x) > 3) m.dir = lead.x > m.x ? 'r' : 'l'; }     // 다 왔으면 그 사람을 바라보고 선다
+      m.moving = dist > 7;
+    } else if (m.state === 'idle') {
       if (m.t <= 0) {
         if (Math.random() < 0.7) {
           const a = rand(0, Math.PI * 2);
@@ -160,7 +185,7 @@ export class Mobs {
       vx = m.ax * sp; vy = m.ay * sp;
       if (m.t <= 0) { m.t = m.state === 'flee' ? rand(0.4, 1.5) : rand(1.5, 5); m.state = 'idle'; }
     }
-    m.moving = m.state !== 'idle';
+    if (m.state !== 'follow') m.moving = m.state !== 'idle';
     if (m.moving && Math.abs(m.ax) > 0.15) m.dir = m.ax > 0 ? 'r' : 'l';
     if (m.kx || m.ky) {                        // 맞았을 때 밀려나기
       vx += m.kx; vy += m.ky;
@@ -176,12 +201,12 @@ export class Mobs {
         if (!this.blocked(m, m.x, m.y + dy)) m.y += dy; else hit = true;
         if (hit && m.moving) {
           if (m.state === 'flee') { const a = rand(0, Math.PI * 2); m.ax = Math.cos(a); m.ay = Math.sin(a) * 0.8; }   // 달아나다 막히면 다른 쪽으로
-          else { m.state = 'idle'; m.t = rand(0.3, 1.5); }
+          else if (m.state !== 'follow') { m.state = 'idle'; m.t = rand(0.3, 1.5); }                                 // 따라오다 막히면 그 앞에서 계속 기다린다
         }
       }
       m.x = Math.max(8, Math.min(MAP_W * TILE - 8, m.x)); m.y = Math.max(10, Math.min(MAP_H * TILE - 6, m.y));
     }
-    m.anim = m.moving ? m.anim + h * (m.state === 'flee' ? 13 : 6) : 0;
+    m.anim = m.moving ? m.anim + h * (m.state === 'flee' ? 13 : m.state === 'follow' ? 10 : 6) : 0;
   }
   updateGuest(dt) {
     const now = performance.now(), k = Math.min(1, dt * 12);
