@@ -1,7 +1,7 @@
 // 월드 렌더러: 지형 → (행 단위 y정렬) 오브젝트·플레이어 → 조명 → 커서
 import { TILE, MAP_W, MAP_H, SURFACE, CAVE, WALL_LIFT, ROOF_LIFT, PLAYER_COLORS } from '../config.js';
 import { GROUND } from '../data/ground.js';
-import { OBJ, O, joins, canPlaque } from '../data/objects.js';
+import { OBJ, O, joins, canPlaque, ROT_DIR } from '../data/objects.js';
 import { MOBS, MOB_KEYS } from '../data/mobs.js';
 import { ITEMS } from '../data/items.js';
 import { hash2, clamp } from '../rng.js';
@@ -56,7 +56,7 @@ export class Renderer {
       const b = { late: (d.solid || d.tall || d.sort) && !d.wall };
       if (d.connect) { b.conn = []; for (let m = 0; m < 16; m++) b.conn.push(get(`${d.spr}_${m}`)); }
       else if (d.gate) b.gate = ['h', 'v'].map((n) => [get(`${d.spr}_${n}_0`), get(`${d.spr}_${n}_1`)]);
-      else if (d.belt) b.belt = [0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((f) => get(`${d.spr}_r${r}_${f}`)));   // [방향][흐르는 프레임]
+      else if (d.belt) b.belt = [0, 1, 2, 3, 4, 5, 6].map((s) => [0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((f) => get(`${d.spr}_${s ? 's' + s + '_' : ''}r${r}_${f}`))));   // [모양][방향][흐르는 프레임]
       else if (d.rot) {
         // 방향이 있는 설치물: rots[방향][meta]
         b.rots = [0, 1, 2, 3].map((r) => Array.from({ length: d.byMeta || 1 }, (_, m) => get(`${d.spr}_${m}${r ? '_r' + r : ''}`)));
@@ -134,7 +134,22 @@ export class Renderer {
       if (b.conn) return b.conn[n | (e << 1) | (s << 2) | (we << 3)];
       return b.gate[!!((n || s) && !(e || we)) !== !!(rot & 1) ? 1 : 0][meta ? 1 : 0];   // 돌리면 가로 ↔ 세로가 바뀐다
     }
-    if (b.belt) return b.belt[rot][((this.t * 16) | 0) & 3];
+    if (b.belt) {
+      // 컨베이어 벨트: 다른 벨트가 흘러 들어오는 쪽은 난간을 열고, 옆에서만 들어오면 모퉁이로 꺾는다
+      let shape = 0;
+      if (w) {
+        const feeds = (k) => {           // k: 0 북 · 1 동 · 2 남 · 3 서 쪽 이웃이 이 칸으로 흘러 들어오는가
+          const dx = k === 1 ? 1 : k === 3 ? -1 : 0, dy = k === 0 ? -1 : k === 2 ? 1 : 0;
+          if (w.obj(L, x + dx, y + dy) !== O.BELT) return false;
+          const f = ROT_DIR[w.rot(L, x + dx, y + dy)];
+          return f[0] === -dx && f[1] === -dy;
+        };
+        // 그림은 남쪽으로 흐르는 것을 기준으로 그렸으므로, 방향만큼 돌려서 본다 (기준 그림의 뒤 = 북, 양옆 = 서 · 동)
+        const back = feeds(rot & 3), west = feeds((3 + rot) & 3), east = feeds((1 + rot) & 3);
+        shape = west && east ? (back ? 5 : 6) : west ? (back ? 3 : 1) : east ? (back ? 4 : 2) : 0;
+      }
+      return b.belt[shape][rot][((this.t * 16) | 0) & 3];
+    }
     if (b.rots) {
       if (def.id === O.CHEST && meta) return this.chest2[meta & 1][rot][meta === 2 || meta === 3 ? 0 : 1];   // 큰 상자의 반쪽
       if (def.id === O.SIGN) meta = w && w.signs[L].get(y * MAP_W + x) ? 1 : 0;                              // 글이 적힌 표지판

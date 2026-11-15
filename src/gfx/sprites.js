@@ -746,14 +746,30 @@ function sign(r, written) {
   out.blit(p);
   return r === 3 ? out.flip() : out;
 }
-// 컨베이어 벨트 (남쪽으로 흐르는 그림. 다른 방향은 돌려서 쓴다). frame 0~3: 띠의 마디가 2px씩 흘러간다
-function belt(frame) {
+// 컨베이어 벨트 (남쪽으로 흐르는 그림. 다른 방향은 돌려서 쓴다). frame 0~3: 띠의 마디가 흘러간다
+// shape: 다른 벨트가 어디서 흘러 들어오는가에 따라 난간이 열리고 띠가 꺾인다
+//   0 곧은 것 (뒤에서만, 또는 아무 데서도)
+//   1 · 2 서쪽 · 동쪽에서만 들어와 꺾이는 모퉁이 (뒤는 난간으로 막힌다)
+//   3 · 4 뒤와 서쪽 · 동쪽에서 합쳐지는 곳      5 뒤와 양옆 모두      6 양옆에서만 (뒤는 막힌다)
+function belt(frame, shape = 0) {
+  if (shape === 2 || shape === 4) return belt(frame, shape - 1).flip();
   const p = new Pix(16, 16), band = 0x2f3038, slat = 0x454853, arrow = 0xc9a227;
+  const openW = shape === 1 || shape === 3 || shape >= 5, openE = shape >= 5, shut = shape === 1 || shape === 6;
   p.rect(0, 0, 16, 16, band);
-  for (let y = 0; y < 16; y++) if ((y - frame * 2 + 16) % 8 === 0) p.rect(2, y, 12, 1, slat);
+  if (shape === 1) {
+    // 모퉁이: 띠의 마디가 안쪽 모서리(들어오는 서쪽과 나가는 남쪽이 만나는 곳)를 축으로 돈다
+    for (let k = -1; k < 3; k++) {
+      const a = ((k * 45 + frame * 11.25) * Math.PI) / 180;
+      if (a < 0.02 || a > Math.PI / 2 - 0.02) continue;
+      for (let r = 2; r < 23; r += 0.5) p.set(Math.floor(r * Math.sin(a)), Math.floor(16 - r * Math.cos(a)), slat);
+    }
+  } else for (let y = 0; y < 16; y++) if ((y - frame * 2 + 16) % 8 === 0) p.rect(0, y, 16, 1, slat);
   for (let k = 0; k < 3; k++) { p.set(7 - k, 9 - k, arrow); p.set(8 + k, 9 - k, arrow); }      // 흐르는 방향
-  for (const x of [0, 14]) { p.rect(x, 0, 2, 16, IRON.d); p.rect(x, 0, 1, 16, IRON.b); }       // 양옆 난간
-  for (const y of [3, 11]) { p.set(0, y, IRON.l); p.set(15, y, IRON.k); }
+  // 난간: 벨트가 이어지지 않는 변에만. 네 모서리의 기둥은 언제나 선다 (이웃 벨트의 난간과 맞닿는 자리)
+  if (!openW) { p.rect(0, 0, 2, 16, IRON.d); p.rect(0, 0, 1, 16, IRON.b); for (const y of [3, 11]) p.set(0, y, IRON.l); }
+  if (!openE) { p.rect(14, 0, 2, 16, IRON.d); p.rect(14, 0, 1, 16, IRON.b); for (const y of [3, 11]) p.set(15, y, IRON.k); }
+  if (shut) { p.rect(0, 0, 16, 2, IRON.d); p.rect(0, 0, 16, 1, IRON.b); for (const x of [4, 11]) p.set(x, 0, IRON.l); }
+  for (const [x, y] of [[0, 0], [14, 0], [0, 14], [14, 14]]) { p.rect(x, y, 2, 2, IRON.d); p.set(x, y, IRON.b); }
   return p;
 }
 // 압축기: 쇠로 된 몸통 위에 피스톤 기둥, 앞에는 누르는 틈과 아궁이. lit = 작동 중, frame = 누르는 동작
@@ -1093,7 +1109,8 @@ export function buildSprites() {
   rots('o_sign_0', (r) => sign(r, false)); rots('o_sign_1', (r) => sign(r, true));
   A('plq_0', plaque(false)); A('plq_1', plaque(true));
   // 공장
-  for (let r = 0; r < 4; r++) for (let f = 0; f < 4; f++) A(`o_belt_r${r}_${f}`, rotN(belt(f), r));
+  // 모양 0(곧은 것)은 o_belt_r방향_프레임, 나머지는 o_belt_s모양_r방향_프레임
+  for (let s = 0; s < 7; s++) for (let r = 0; r < 4; r++) for (let f = 0; f < 4; f++) A(s ? `o_belt_s${s}_r${r}_${f}` : `o_belt_r${r}_${f}`, rotN(belt(f, s), r));
   rots('o_compressor_0', (r) => compressor(false, 0, r));
   rots('o_compressor_1', (r) => compressor(true, 0, r));
   rots('o_compressor_1b', (r) => compressor(true, 1, r));
