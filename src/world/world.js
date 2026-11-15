@@ -1,4 +1,4 @@
-// 월드 데이터: 지상/지하 두 레이어의 타일 배열 + 타일 엔티티 + 성장 타이머 + 지붕 · 깃발
+// 월드 데이터: 지상/지하 두 레이어의 타일 배열 + 타일 엔티티 + 성장 타이머 + 지붕 · 깃발 · 표지판 글
 import { MAP_W, MAP_H } from '../config.js';
 import { GROUND } from '../data/ground.js';
 import { O, OBJ } from '../data/objects.js';
@@ -13,6 +13,7 @@ export class World {
     const mk = () => ({
       ground: new Uint8Array(N), obj: new Uint8Array(N), meta: new Uint8Array(N), seen: new Uint8Array(N),
       roof: new Uint8Array(N),            // 타일 위를 덮는 지붕 (0 없음 / 1 있음)
+      rot: new Uint8Array(N),             // 설치물이 바라보는 방향 (0 남 · 1 서 · 2 북 · 3 동 — R 키로 시계 방향으로 돈다)
     });
     this.layers = [mk(), mk()];
     this.ents = [new Map(), new Map()];   // idx → { type, ... } (상자, 화로)
@@ -21,7 +22,12 @@ export class World {
     this.spawn = { x: MAP_W >> 1, y: MAP_H >> 1 };
     this.flags = [[], []];                // 깃발이 꽂힌 타일 idx 목록 (지도 표시용)
     this.roofs = [new Set(), new Set()];  // 지붕 타일 idx 집합
+    // 표지판 글: idx → 글. 그 칸이 표지판(O.SIGN)이면 세워 둔 표지판의 글이고,
+    // 다른 블록이면 그 블록에 붙인 나무 판(글이 비어 있어도 항목이 있으면 판이 붙어 있는 것)이다
+    this.signs = [new Map(), new Map()];
     this.regions = [null, null];          // 이어진 지붕 덩어리 캐시 (idx → region)
+    this.belts = [new Set(), new Set()];  // 컨베이어 벨트가 놓인 타일 idx 집합
+    this.oreV = 1;                        // 광맥을 만든 규칙의 버전 (gen.js ORE_VERSION)
     this.onChange = null;                 // (layer, x, y) — 미니맵 갱신용
   }
   inb(x, y) { return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H; }
@@ -30,17 +36,28 @@ export class World {
   obj(l, x, y) { return this.inb(x, y) ? this.layers[l].obj[y * MAP_W + x] : 0; }
   meta(l, x, y) { return this.inb(x, y) ? this.layers[l].meta[y * MAP_W + x] : 0; }
   roof(l, x, y) { return this.inb(x, y) ? this.layers[l].roof[y * MAP_W + x] : 0; }
+  rot(l, x, y) { return this.inb(x, y) ? this.layers[l].rot[y * MAP_W + x] : 0; }
+  // 이 칸의 블록에 나무 판(표지판)이 붙어 있는가
+  plaque(l, i) { return this.signs[l].has(i) && this.layers[l].obj[i] !== O.SIGN; }
   setGround(l, x, y, g) {
     if (!this.inb(x, y)) return;
     this.layers[l].ground[y * MAP_W + x] = g;
     if (this.onChange) this.onChange(l, x, y);
   }
-  setObj(l, x, y, o, m = 0) {
+  setObj(l, x, y, o, m = 0, r = 0) {
     if (!this.inb(x, y)) return;
     const i = y * MAP_W + x, L = this.layers[l], old = L.obj[i];
     if (old === O.FLAG && o !== O.FLAG) { const k = this.flags[l].indexOf(i); if (k >= 0) this.flags[l].splice(k, 1); }
     if (o === O.FLAG && old !== O.FLAG) this.flags[l].push(i);
-    L.obj[i] = o; L.meta[i] = m;
+    if (old !== o) this.signs[l].delete(i);   // 표지판 글은 그 칸의 블록에 딸린 것이라, 블록이 바뀌면 함께 사라진다
+    if (old === O.BELT && o !== O.BELT) this.belts[l].delete(i);
+    if (o === O.BELT) this.belts[l].add(i);
+    L.obj[i] = o; L.meta[i] = m; L.rot[i] = r & 3;
+    if (this.onChange) this.onChange(l, x, y);
+  }
+  setRot(l, x, y, r) {
+    if (!this.inb(x, y)) return;
+    this.layers[l].rot[y * MAP_W + x] = r & 3;
     if (this.onChange) this.onChange(l, x, y);
   }
   setMeta(l, x, y, m) {
@@ -60,11 +77,13 @@ export class World {
   rescan() {
     for (let l = 0; l < 2; l++) {
       const L = this.layers[l];
-      this.flags[l] = []; this.roofs[l] = new Set(); this.regions[l] = null;
+      this.flags[l] = []; this.roofs[l] = new Set(); this.regions[l] = null; this.belts[l] = new Set();
       for (let i = 0; i < N; i++) {
         if (L.obj[i] === O.FLAG) this.flags[l].push(i);
+        else if (L.obj[i] === O.BELT) this.belts[l].add(i);
         if (L.roof[i]) this.roofs[l].add(i);
       }
+      for (const i of [...this.signs[l].keys()]) if (!L.obj[i]) this.signs[l].delete(i);   // 블록이 없는 칸의 글은 버린다
     }
   }
   // 이 타일을 덮은 지붕이 속한 덩어리(상하좌우로 이어진 지붕들)

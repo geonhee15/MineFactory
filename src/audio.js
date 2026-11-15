@@ -275,6 +275,11 @@ export class AudioSys {
       case 'till': N({ f: 720 * p, f2: 300, q: 0.8, dur: 0.17, vol: 0.4 }); T({ type: 'triangle', f: 140, f2: 80, dur: 0.1, vol: 0.25 }); break;
       case 'shovel': N({ type: 'lowpass', f: 560 * p, f2: 210, dur: 0.12, vol: 0.4 }); T({ type: 'triangle', f: 118, f2: 68, dur: 0.1, vol: 0.3 }); N({ f: 1700 * p, q: 1.2, dur: 0.04, vol: 0.1, t: 0.03 }); break;
       // 사냥과 동물 울음소리
+      case 'press': T({ type: 'triangle', f: 120 * p, f2: 55, dur: 0.16, vol: 0.5 }); N({ type: 'lowpass', f: 900, f2: 200, dur: 0.12, vol: 0.4 }); N({ f: 3200, q: 1.2, dur: 0.05, vol: 0.12, t: 0.1 }); T({ type: 'square', f: 880, f2: 660, dur: 0.05, vol: 0.04, t: 0.14 }); break;
+      case 'rotate': T({ type: 'triangle', f: 300 * p, f2: 210, dur: 0.05, vol: 0.3 }); N({ f: 1500, q: 1.4, dur: 0.035, vol: 0.14 }); T({ type: 'triangle', f: 380 * p, f2: 300, dur: 0.04, vol: 0.2, t: 0.06 }); break;
+      case 'write': [0, 0.07, 0.15].forEach((t, i) => N({ f: (2600 + i * 500) * p, q: 2.2, dur: 0.05, vol: 0.13, t })); break;
+      case 'groggy': [0, 0.34].forEach((t) => { T({ type: 'triangle', f: 92, f2: 60, dur: 0.16, vol: 0.5, t }); T({ type: 'triangle', f: 74, f2: 52, dur: 0.2, vol: 0.4, t: t + 0.13 }); }); break;
+      case 'death': [64, 60, 57, 52].forEach((m, i) => T({ type: 'triangle', f: hz(m), f2: hz(m) * 0.94, dur: 0.42, vol: 0.2, t: i * 0.2, send: 0.5, attack: 0.01 })); N({ type: 'lowpass', f: 700, f2: 120, dur: 0.5, vol: 0.35 }); N({ f: 2400, q: 0.8, dur: 0.12, vol: 0.2 }); break;
       case 'swing': N({ f: 900 * p, f2: 2600, q: 0.9, dur: 0.11, vol: 0.16 }); break;
       case 'hit_mob': N({ type: 'lowpass', f: 900 * p, f2: 240, dur: 0.1, vol: 0.5 }); T({ type: 'triangle', f: 190 * p, f2: 90, dur: 0.1, vol: 0.4 }); break;
       case 'mob_die': N({ f: 1400, f2: 500, q: 0.6, dur: 0.22, vol: 0.3 }); T({ f: 420 * p, f2: 160, dur: 0.2, vol: 0.16 }); break;

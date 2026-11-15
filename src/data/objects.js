@@ -6,7 +6,7 @@ export const O = {
   ROCK: 20, ANDESITE: 21, GRANITE: 22, COAL_ORE: 23, IRON_ORE: 24, COPPER_ORE: 25, GOLD_ORE: 26, BEDROCK: 27,
   STALAGMITE: 28, GLOWSHROOM: 29, CRYSTAL: 30,
   WORKBENCH: 31, FURNACE: 32, CHEST: 33, TORCH: 34, WOOD_WALL: 35, STONE_BRICK: 36, DOOR: 37, BED: 38,
-  SAPLING: 39, WHEAT: 40, CARROT: 41, FLAG: 42, FENCE: 43, GATE: 44, WOOL_BED: 45,
+  SAPLING: 39, WHEAT: 40, CARROT: 41, FLAG: 42, FENCE: 43, GATE: 44, WOOL_BED: 45, SIGN: 46, BELT: 47, COMPRESSOR: 48,
 };
 
 // 재질별 파티클 색
@@ -23,7 +23,7 @@ const def = (id, d) => {
   OBJ[id] = {
     id, name: '', solid: false, wall: false, spr: null, n: 1, byMeta: 0, frames: 0,
     tool: null, tier: 0, hard: 1, drops: null, mat: 'plant', pcol: PC.plant,
-    light: null, use: null, map: -1, tall: false, replace: false, canBreak: true, ...d,
+    light: null, use: null, map: -1, tall: false, replace: false, canBreak: true, rot: false, ...d,
   };
 };
 
@@ -76,20 +76,32 @@ def(O.GLOWSHROOM, { name: '빛버섯', spr: 'o_glowshroom', n: 2, hard: 0.15, dr
 def(O.CRYSTAL, { name: '수정', solid: true, spr: 'o_crystal', n: 2, tool: 'pick', tier: 2, hard: 6, drops: [['crystal', 1, 2]], mat: 'stone', pcol: [0x9fd8ff, 0xe4f6ff, 0x5a9be0], light: { r: 3, c: 'cool' }, map: 0x9fd8ff });
 
 // ── 설치물 ──────────────────────────────────────────────────
-def(O.WORKBENCH, { name: '제작대', solid: true, spr: 'o_workbench', tool: 'axe', hard: 1.2, drops: [['workbench', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'workbench', map: 0xc49a5c });
-def(O.FURNACE, { name: '화로', solid: true, spr: 'o_furnace', byMeta: 2, tool: 'pick', hard: 2, drops: [['furnace', 1, 1]], mat: 'stone', pcol: PC.stone, use: 'furnace', map: 0x5a5e68, lightIf: { r: 4.2, c: 'warm' } });
-def(O.CHEST, { name: '상자', solid: true, spr: 'o_chest', tool: 'axe', hard: 1.2, drops: [['chest', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'chest', map: 0xa87f47 });
+// rot: R 키로 돌릴 수 있다 (방향마다 그림이 따로 있다. 0 남 · 1 서 · 2 북 · 3 동을 바라본다)
+def(O.WORKBENCH, { name: '제작대', solid: true, spr: 'o_workbench', tool: 'axe', hard: 1.2, drops: [['workbench', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'workbench', map: 0xc49a5c, rot: true });
+def(O.FURNACE, { name: '화로', solid: true, spr: 'o_furnace', byMeta: 2, tool: 'pick', hard: 2, drops: [['furnace', 1, 1]], mat: 'stone', pcol: PC.stone, use: 'furnace', map: 0x5a5e68, lightIf: { r: 4.2, c: 'warm' }, rot: true });
+// 상자: 나란히 붙은 두 상자는 큰 상자가 된다. meta = 짝이 있는 쪽 (0 없음 · 1 북 · 2 동 · 3 남 · 4 서)
+def(O.CHEST, { name: '상자', solid: true, spr: 'o_chest', tool: 'axe', hard: 1.2, drops: [['chest', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'chest', map: 0xa87f47, rot: true });
 def(O.TORCH, { name: '횃불', spr: 'o_torch', frames: 3, hard: 0.1, drops: [['torch', 1, 1]], mat: 'wood', pcol: [0xffb347, 0x7a5536], light: { r: 7, c: 'warm' }, map: 0xffb347 });
-def(O.WOOD_WALL, { name: '나무 벽', solid: true, wall: true, spr: 'w_wood', tool: 'axe', hard: 1.6, drops: [['wood_wall', 1, 1]], mat: 'wood', pcol: PC.wood, map: 0x96693a });
-def(O.STONE_BRICK, { name: '돌 벽돌', solid: true, wall: true, spr: 'w_brick', tool: 'pick', tier: 1, hard: 3.5, drops: [['stone_brick', 1, 1]], mat: 'stone', pcol: PC.stone, map: 0x9aa0aa });
-def(O.DOOR, { name: '문', solid: true, spr: 'o_door', byMeta: 2, tool: 'axe', hard: 1.2, drops: [['door', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'door', map: 0x7a5536 });
-def(O.BED, { name: '침대', solid: true, spr: 'o_bed', tool: 'axe', hard: 1.2, drops: [['bed', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'bed', map: 0xd9583b });
+def(O.WOOD_WALL, { name: '나무 벽', solid: true, wall: true, spr: 'w_wood', tool: 'axe', hard: 1.6, drops: [['wood_wall', 1, 1]], mat: 'wood', pcol: PC.wood, map: 0x96693a, rot: true });
+def(O.STONE_BRICK, { name: '돌 벽돌', solid: true, wall: true, spr: 'w_brick', tool: 'pick', tier: 1, hard: 3.5, drops: [['stone_brick', 1, 1]], mat: 'stone', pcol: PC.stone, map: 0x9aa0aa, rot: true });
+def(O.DOOR, { name: '문', solid: true, spr: 'o_door', byMeta: 2, tool: 'axe', hard: 1.2, drops: [['door', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'door', map: 0x7a5536, rot: true });
+def(O.BED, { name: '침대', solid: true, spr: 'o_bed', tool: 'axe', hard: 1.2, drops: [['bed', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'bed', map: 0xd9583b, rot: true });
 // 양모 침대(nap): 일어나면 포만감이 가득 차고, 낮에는 저녁까지 낮잠을 잘 수 있다
-def(O.WOOL_BED, { name: '양모 침대', solid: true, spr: 'o_woolbed', tool: 'axe', hard: 1.2, drops: [['wool_bed', 1, 1]], mat: 'wood', pcol: [0xf3ead2, 0xd9cba6, 0xc49a5c], use: 'bed', nap: true, map: 0xf3ead2 });
+def(O.WOOL_BED, { name: '양모 침대', solid: true, spr: 'o_woolbed', tool: 'axe', hard: 1.2, drops: [['wool_bed', 1, 1]], mat: 'wood', pcol: [0xf3ead2, 0xd9cba6, 0xc49a5c], use: 'bed', nap: true, map: 0xf3ead2, rot: true });
 // 울타리(connect): 이웃한 울타리 · 울타리 문 · 벽 쪽으로 가로대가 이어진다. 사람도 동물도 넘지 못한다
 def(O.FENCE, { name: '울타리', solid: true, spr: 'o_fence', connect: true, tool: 'axe', hard: 0.9, drops: [['fence', 1, 1]], mat: 'wood', pcol: PC.wood, map: 0x96693a });
-// 울타리 문(gate): meta 0 닫힘 / 1 열림. 사람만 여닫을 수 있고, 울타리가 이어진 방향에 맞춰 그려진다
-def(O.GATE, { name: '울타리 문', solid: true, spr: 'o_gate', gate: true, tool: 'axe', hard: 0.9, drops: [['fence_gate', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'gate', map: 0xcfa468 });
+// 울타리 문(gate): meta 0 닫힘 / 1 열림. 사람만 여닫을 수 있고, 울타리가 이어진 방향에 맞춰 그려진다 (R로 돌리면 가로 ↔ 세로가 바뀐다)
+def(O.GATE, { name: '울타리 문', solid: true, spr: 'o_gate', gate: true, tool: 'axe', hard: 0.9, drops: [['fence_gate', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'gate', map: 0xcfa468, rot: true });
+// 표지판: 땅에 세우고 글을 쓴다. 막지 않아 지나다닐 수 있다 (sort: 막지 않지만 사람·동물과 앞뒤를 가려 그린다)
+// 다른 블록에 대고 놓으면 표지판 대신 그 블록에 나무 판이 붙는다 (글은 world.signs)
+def(O.SIGN, { name: '표지판', spr: 'o_sign', byMeta: 2, sort: true, hard: 0.35, tool: 'axe', drops: [['sign', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'sign', map: 0xdab676, rot: true });
+
+// ── 공장 ────────────────────────────────────────────────────
+// 컨베이어 벨트(belt): 바라보는 방향으로 그 위의 아이템을 실어 나른다. 밟고 지나갈 수 있다.
+// 앞쪽에 상자 · 기계가 붙어 있으면 물건을 넣고, 뒤쪽에 붙어 있으면 거기서 물건을 꺼낸다
+def(O.BELT, { name: '컨베이어 벨트', spr: 'o_belt', belt: true, tool: 'pick', hard: 0.5, drops: [['belt', 1, 1]], mat: 'stone', pcol: [0x44474f, 0x70757f, 0xc9a227], map: 0x5a5e68, rot: true });
+// 압축기: 연료를 태워 재료 3개를 판 하나로 눌러 만든다 (meta 1 = 작동 중)
+def(O.COMPRESSOR, { name: '압축기', solid: true, spr: 'o_compressor', byMeta: 2, tool: 'pick', hard: 2.4, drops: [['compressor', 1, 1]], mat: 'stone', pcol: [0x8791a3, 0xa9b2c2, 0x646d80], use: 'compressor', map: 0x8791a3, lightIf: { r: 3.2, c: 'warm' }, rot: true });
 
 // ── 자라는 것들 ─────────────────────────────────────────────
 export const SAPLING_ITEMS = ['sapling_oak', 'sapling_pine', 'sapling_birch', 'sapling_apple'];
@@ -112,5 +124,22 @@ export const FLAG_COLORS = [
 def(O.FLAG, { name: '깃발', spr: 'o_flag', byMeta: FLAG_COLORS.length, frames: 3, tall: true, hard: 0.3, drops: [['flag', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'flag' });
 
 export const isWall = (o) => OBJ[o].wall;
+// 나무 판(표지판)을 붙일 수 있는 블록인가: 단단한 블록이면 되지만, 여닫는 문 · 침대 · 드나드는 입구는 안 된다
+const NO_PLAQUE = { door: 1, gate: 1, bed: 1, cave: 1, ladder: 1, sign: 1 };
+export const canPlaque = (o) => !!o && OBJ[o].solid && !NO_PLAQUE[OBJ[o].use];
+// 표지판 글: 4줄까지, 한 줄에 14자까지
+export const SIGN_LINES = 4, SIGN_COLS = 14;
+export const cleanSign = (text) => {
+  const lines = String(text ?? '').replace(/\r/g, '').split('\n').slice(0, SIGN_LINES).map((s) => [...s.replace(/[\u0000-\u001f]/g, '')].slice(0, SIGN_COLS).join('').trimEnd());
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  return lines.join('\n');
+};
+// 내용물(타일 엔티티)을 가진 블록 → 그 종류
+const ENT_TYPE = { [O.CHEST]: 'chest', [O.FURNACE]: 'furnace', [O.COMPRESSOR]: 'compressor' };
+export const entType = (o) => ENT_TYPE[o] || null;
+// 방향(rot) → 그쪽으로 한 칸 (dx, dy): 0 남 · 1 서 · 2 북 · 3 동
+export const ROT_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
+// 큰 상자: 상자의 meta가 가리키는 짝의 방향 (dx, dy)
+export const CHEST_DIR = [null, [0, -1], [1, 0], [0, 1], [-1, 0]];
 // 울타리가 이어 붙는 이웃인가
 export const joins = (o) => o === O.FENCE || o === O.GATE || OBJ[o].wall;

@@ -1,14 +1,21 @@
-// 저장: IndexedDB(브라우저 저장소) + 자동 백업 + 파일 내보내기/불러오기 + 손님 프로필
+// 저장: IndexedDB(브라우저 저장소) + 세계 여러 개 + 세계마다 자동 백업 + 파일 내보내기/불러오기 + 손님 프로필
 // 타일 배열이 커서(수 MB) 쿠키나 localStorage가 아니라 IndexedDB를 쓴다.
+//
+// 저장소의 열쇠(key):
+//   <SLOT>:worlds        세계 목록 [{ key, name, createdAt, savedAt, day, seed }]
+//   <세계 key>           그 세계의 지금 세이브   (새 세계는 '<SLOT>:w:<번호>', 세계가 하나뿐이던 때의 세이브는 '<SLOT>' 그대로)
+//   <세계 key>:index     그 세계의 백업 목록
+//   <세계 key>:bak:<시각> 백업 하나
+//   guest:<세계 id>      멀티플레이 손님으로 들어간 남의 세계에서의 내 가방 · 진행도
 import { SAVE_VERSION, MAP_W, MAP_H, DAY_LENGTH } from './config.js';
 import { World } from './world/world.js';
 
 const DB = 'minefactory', STORE = 'saves';
 // 주소에 ?slot=이름 을 붙이면 다른 저장 칸을 쓴다 (테스트할 때 실제 저장을 덮어쓰지 않도록)
 export const SLOT = new URLSearchParams(location.search).get('slot') || 'slot1';
-const INDEX = SLOT + ':index';
+const WORLDS = SLOT + ':worlds';
 const N = MAP_W * MAP_H;
-const ARR = ['ground', 'obj', 'meta', 'seen', 'roof'];
+const ARR = ['ground', 'obj', 'meta', 'seen', 'roof', 'rot'];
 const MAX_BACKUPS = 6;                 // 백업은 최근 6개까지 보관
 const BACKUP_EVERY = 10 * 60 * 1000;   // 자동 백업 간격(10분)
 
@@ -40,18 +47,20 @@ const dayOf = (d) => Math.floor((d.time || 0) / DAY_LENGTH) + 1;
 // ── 게임 ↔ 저장 데이터 ──────────────────────────────────────
 export function serialize(game) {
   const w = game.world;
-  const ent = (e) => (e.type === 'furnace'
+  const ent = (e) => (e.type !== 'chest'      // 화로 · 압축기
     ? { type: e.type, slots: e.slots, burn: e.burn, burnMax: e.burnMax, prog: e.prog }
     : { type: e.type, slots: e.slots });
   return {
-    v: SAVE_VERSION, savedAt: Date.now(),
+    v: SAVE_VERSION, savedAt: Date.now(), name: game.worldName || '',
     id: w.id, seed: w.seed, time: game.time, layer: game.layer, hotbar: game.hotbar, quest: game.quest,
-    player: { x: game.player.x, y: game.player.y, dir: game.player.dir, hunger: game.player.hunger },
+    player: { x: game.player.x, y: game.player.y, dir: game.player.dir, hunger: game.player.hunger, groggy: game.player.groggy, bed: game.player.bed },
     inv: game.inv.slots, stats: game.stats,
     layers: w.layers, ents: w.ents.map((m) => [...m].map(([i, e]) => [i, ent(e)])), grow: w.grow.map((m) => [...m]),
     entrances: w.entrances, spawn: w.spawn,
     drops: game.drops.map((d) => ({ id: d.id, n: d.n, x: d.x, y: d.y, layer: d.layer, age: d.age })),
     mobs: game.mobs.serialize(),        // 동물 [종류, x, y, 체력]
+    signs: w.signs.map((m) => [...m]),  // 표지판 글 [idx, 글]
+    oreV: w.oreV,                       // 광맥을 만든 규칙의 버전
   };
 }
 
@@ -62,49 +71,99 @@ export function restoreWorld(data) {
     for (const k of ARR) if (data.layers[l][k]) w.layers[l][k].set(data.layers[l][k]);
     w.ents[l] = new Map(data.ents[l]);
     w.grow[l] = new Map(data.grow[l]);
+    w.signs[l] = new Map(((data.signs && data.signs[l]) || []).filter((e) => Array.isArray(e) && typeof e[1] === 'string'));
   }
   w.entrances = data.entrances; w.spawn = data.spawn;
   w.rescan();
   return w;
 }
 
-// ── 현재 세이브 ─────────────────────────────────────────────
+// ── 세계 목록 ───────────────────────────────────────────────
+let CUR = null;          // 지금 플레이하는 세계의 key (저장은 여기에 한다)
 let lastBackup = 0;
-export async function writeSave(data) {
-  await put(SLOT, data);
+export const currentWorld = () => CUR;
+export function setWorld(key) { CUR = key; lastBackup = 0; }
+const cleanName = (n, fallback) => String(n ?? '').replace(/\s+/g, ' ').trim().slice(0, 20) || fallback;
+// 최근에 플레이한 세계가 앞에 온다
+export async function listWorlds() {
+  let list = null;
+  try { list = await get(WORLDS); } catch (e) { console.warn('세계 목록을 읽지 못했습니다', e); return []; }
+  if (!Array.isArray(list)) {
+    // 세계가 하나뿐이던 때의 세이브가 있으면, 옮기거나 고치지 않고 그 자리 그대로 첫 세계로 올린다
+    list = [];
+    const old = await get(SLOT);
+    if (old && old.v === SAVE_VERSION) {
+      const at = old.savedAt || Date.now();
+      list.push({ key: SLOT, name: cleanName(old.name, '나의 첫 세계'), createdAt: at, savedAt: at, day: dayOf(old), seed: old.seed });
+    }
+    await put(WORLDS, list);
+  }
+  return list.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+}
+export async function createWorld(name, seed) {
+  const list = await listWorlds(), at = Date.now();
+  const w = { key: `${SLOT}:w:${newId()}`, name: cleanName(name, `세계 ${list.length + 1}`), createdAt: at, savedAt: at, day: 1, seed };
+  list.unshift(w);
+  await put(WORLDS, list);
+  return w;
+}
+export async function renameWorld(key, name) {
+  const list = await listWorlds(), w = list.find((x) => x.key === key);
+  if (!w) return null;
+  w.name = cleanName(name, w.name);
+  await put(WORLDS, list);
+  return w;
+}
+// 세계와 그 백업을 모두 지운다 (되돌릴 수 없다 — 부르기 전에 꼭 확인을 받는다)
+export async function deleteWorld(key) {
+  const list = await listWorlds(), k = list.findIndex((x) => x.key === key);
+  if (k < 0) return;
+  for (const b of await listBackups(key)) await del(b.key);
+  await del(key + ':index');
+  await del(key);
+  list.splice(k, 1);
+  await put(WORLDS, list);
+  if (CUR === key) CUR = null;
+}
+async function touchWorld(key, data) {
+  const list = await listWorlds(), w = list.find((x) => x.key === key);
+  if (!w) return;
+  w.savedAt = data.savedAt || Date.now(); w.day = dayOf(data); w.seed = data.seed;
+  await put(WORLDS, list);
+}
+
+// ── 세이브 ──────────────────────────────────────────────────
+export async function writeSave(data, key = CUR) {
+  if (!key) return;                      // 고른 세계가 없으면(손님으로만 놀았다든지) 저장할 곳이 없다
+  await put(key, data);
+  await touchWorld(key, data);
   protect();
-  if (!lastBackup) { const idx = await listBackups(); lastBackup = idx.length ? idx[0].at : 1; }
-  if (Date.now() - lastBackup > BACKUP_EVERY) await backup(data, 'auto');
+  if (key !== CUR) return;
+  if (!lastBackup) { const idx = await listBackups(key); lastBackup = idx.length ? idx[0].at : 1; }
+  if (Date.now() - lastBackup > BACKUP_EVERY) await backup(data, 'auto', key);
 }
 export const saveGame = (game) => writeSave(serialize(game));
-export async function loadSave() {
+export async function loadWorld(key) {
   try {
-    const d = await get(SLOT);
+    const d = key ? await get(key) : null;
     return d && d.v === SAVE_VERSION ? d : null;
   } catch (e) { console.warn('저장 데이터를 읽지 못했습니다', e); return null; }
 }
-export const deleteSave = () => del(SLOT);
 
-// ── 백업 ───────────────────────────────────────────────────
-// reason: 'auto'(자동) | 'new'(새 게임 시작 전) | 'restore'(되돌리기 전) | 'import'(파일 불러오기 전)
-export async function backup(data, reason = 'auto') {
-  if (!data) return;
-  const at = Date.now(), key = `${SLOT}:bak:${at}`;
-  await put(key, data);
-  const idx = (await get(INDEX)) || [];
-  idx.unshift({ key, at, savedAt: data.savedAt || at, day: dayOf(data), reason });
+// ── 백업 (세계마다 따로) ──────────────────────────────────────
+// reason: 'auto'(자동) | 'restore'(되돌리기 전) | 'new' · 'import'(예전 방식: 새 게임 · 파일 불러오기로 덮어쓰기 전)
+export async function backup(data, reason = 'auto', key = CUR) {
+  if (!data || !key) return;
+  const at = Date.now(), bk = `${key}:bak:${at}`;
+  await put(bk, data);
+  const idx = (await get(key + ':index')) || [];
+  idx.unshift({ key: bk, at, savedAt: data.savedAt || at, day: dayOf(data), reason });
   while (idx.length > MAX_BACKUPS) { const old = idx.pop(); await del(old.key); }
-  await put(INDEX, idx);
-  lastBackup = at;
+  await put(key + ':index', idx);
+  if (key === CUR) lastBackup = at;
 }
-export async function listBackups() { try { return (await get(INDEX)) || []; } catch { return []; } }
+export async function listBackups(key = CUR) { try { return (key && (await get(key + ':index'))) || []; } catch { return []; } }
 export const loadBackup = (key) => get(key);
-// 지금 세이브를 지우기 전에 백업으로 옮긴다
-export async function shelve(reason) {
-  const cur = await loadSave();
-  if (cur) await backup(cur, reason);
-  await deleteSave();
-}
 
 // ── 브라우저가 멋대로 지우지 못하게 ───────────────────────────
 let asked = false;
@@ -171,7 +230,8 @@ export async function importFile(file) {
 }
 export function fileName(data) {
   const d = new Date(data.savedAt || Date.now()), p = (n) => String(n).padStart(2, '0');
-  return `MineFactory-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}-day${dayOf(data)}.mfsave`;
+  const nm = String(data.name || '').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 20);
+  return `MineFactory-${nm ? nm + '-' : ''}${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}-day${dayOf(data)}.mfsave`;
 }
 
 // ── 멀티플레이 손님: 남의 세계에서의 내 가방·진행도 ─────────────

@@ -7,15 +7,17 @@
 //  · 부수기/따기 : 손님은 방장에게 요청 → 방장이 처리하고 드롭을 만든다 (brk, hv) — 아이템 복사 방지
 //  · 드롭 아이템 : 방장이 만들고(d+), 줍는 것도 방장이 한 명에게만 허락한다(dq → d-)
 //  · 상자·화로  : 한 번에 한 사람만 열 수 있다. 연 사람이 내용을 책임지고 방장에게 돌려준다 (eo/eg/eu/ec)
+//                  큰 상자는 두 칸을 한꺼번에 맡는다
+//  · 표지판 글   : 쓰면 방장을 거쳐 모두에게 전달 (sg). 블록에 붙인 나무 판을 떼는 것은 방장이 처리한다 (sx)
 //  · 성장·시간   : 방장만 계산해서 결과를 보낸다
 //  · 동물        : 방장만 움직인다. 손님에게는 가까운 동물들의 위치를 보내고(ms), 손님이 때리면 방장이 처리한다(mh → md)
 import { MAP_W, MAP_H, TILE } from './config.js';
-import { O, OBJ } from './data/objects.js';
+import { O, OBJ, canPlaque, cleanSign, entType } from './data/objects.js';
 import { ITEMS, attackDamage } from './data/items.js';
 import { pack, unpack, gzip, gunzip, b64enc, b64dec, restoreWorld, loadProfile } from './save.js';
 
 const N = MAP_W * MAP_H;
-const PROTO = 3;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
+const PROTO = 5;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
 const PREFIX = 'mf1-';
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
 export const MAX_PLAYERS = 8;
@@ -25,7 +27,7 @@ const CHUNK = 12000;
 const TILE_BATCH = 400;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 헷갈리는 0·O·1·I 제외
 const rand = (a, b) => a + Math.random() * (b - a);
-const entPub = (e) => (e.type === 'furnace'
+const entPub = (e) => (e.type !== 'chest'      // 화로 · 압축기
   ? { type: e.type, slots: e.slots, burn: e.burn, burnMax: e.burnMax, prog: e.prog }
   : { type: e.type, slots: e.slots });
 const dropPub = (d) => ({ uid: d.uid, id: d.id, n: d.n, x: Math.round(d.x), y: Math.round(d.y), layer: d.layer, vx: d.vx | 0, vy: d.vy | 0, t: d.t });
@@ -208,7 +210,7 @@ export class Net {
   to(id, m) { if (this.tp) this.tp.send(id, m); }
   all(m, except) { if (this.tp) for (const id of this.players.keys()) if (id !== except) this.tp.send(id, m); }
   send(m) { if (this.role === 'guest' && this.tp) this.tp.send(this.hostId, m); }
-  tile(l, i) { const L = this.game.world.layers[l]; return [l, i, L.ground[i], L.obj[i], L.meta[i], L.roof[i]]; }
+  tile(l, i) { const L = this.game.world.layers[l]; return [l, i, L.ground[i], L.obj[i], L.meta[i], L.roof[i], L.rot[i]]; }
   mark(l, i) { if (this.role !== 'off' && !this.applying) this.dirty.add(l * N + i); }
   quiet(fn) { const was = this.applying; this.applying = true; try { fn(); } finally { this.applying = was; } }
   flush() {
@@ -225,11 +227,11 @@ export class Net {
 
   // ── 타일 적용 ──
   applyTile(t) {
-    const [l, i, gr, o, me, r] = t, w = this.game.world, L = w.layers[l];
+    const [l, i, gr, o, me, r] = t, ro = t[6] & 3, w = this.game.world, L = w.layers[l];
     if (!L || i < 0 || i >= N) return 0;
     const x = i % MAP_W, y = (i / MAP_W) | 0, prev = L.obj[i];
     if (L.ground[i] !== gr) w.setGround(l, x, y, gr);
-    if (L.obj[i] !== o || L.meta[i] !== me) w.setObj(l, x, y, o, me);
+    if (L.obj[i] !== o || L.meta[i] !== me || L.rot[i] !== ro) w.setObj(l, x, y, o, me, ro);
     if (L.roof[i] !== r) w.setRoof(l, x, y, r);
     return prev;
   }
@@ -283,19 +285,35 @@ export class Net {
       }
       case 'eo': {
         const { l, i } = m, o = w.layers[l] ? w.layers[l].obj[i] : 0;
-        const type = o === O.CHEST ? 'chest' : o === O.FURNACE ? 'furnace' : null;
+        const type = entType(o);
         if (!type) { this.to(id, { t: 'ex', why: 'gone' }); break; }
-        const e = g.ensureEnt(l, i, type);
-        if (e.owner && e.owner !== id) { this.to(id, { t: 'ex', why: 'busy' }); break; }
+        // 큰 상자면 두 칸을 함께 맡긴다 (j, ent2 = 다른 반쪽)
+        const [e, e2] = g.entsAt(l, i, type), busy = (x) => x && x.owner && x.owner !== id;
+        if (busy(e) || busy(e2)) { this.to(id, { t: 'ex', why: 'busy' }); break; }
         e.owner = id;
-        this.to(id, { t: 'eg', l, i, ent: entPub(e) });
+        const msg = { t: 'eg', l, i: e2 ? Math.min(i, g.chestPartner(l, i)) : i, ent: entPub(e) };
+        if (e2) { e2.owner = id; msg.j = Math.max(i, g.chestPartner(l, i)); msg.ent2 = entPub(e2); }
+        this.to(id, msg);
         break;
       }
+      case 'sg': {
+        // 표지판 글 쓰기 / 블록에 나무 판 붙이기
+        const { l, i } = m, L = w.layers[l];
+        if (!L || !Number.isInteger(i) || i < 0 || i >= N) break;
+        const o = L.obj[i], signs = w.signs[l], text = cleanSign(m.text);
+        if (o !== O.SIGN && !signs.has(i) && !canPlaque(o)) { this.to(id, { t: 'sx', l, i }); break; }   // 거절: 붙일 수 없는 자리
+        if (text || o !== O.SIGN) signs.set(i, text); else signs.delete(i);
+        this.all({ t: 'sg', l, i, text }, id);
+        break;
+      }
+      case 'sx':
+        if (w.layers[m.l] && Number.isInteger(m.i) && m.i >= 0 && m.i < N) g.removePlaque(m.i % MAP_W, (m.i / MAP_W) | 0, m.l, true);
+        break;
       case 'eu': case 'ec': {
         const e = w.ents[m.l] && w.ents[m.l].get(m.i);
         if (e && e.owner === id && m.ent && Array.isArray(m.ent.slots)) {
           e.slots = m.ent.slots;
-          if (e.type === 'furnace') { e.burn = +m.ent.burn || 0; e.burnMax = +m.ent.burnMax || 0; e.prog = +m.ent.prog || 0; }
+          if (e.type !== 'chest') { e.burn = +m.ent.burn || 0; e.burnMax = +m.ent.burnMax || 0; e.prog = +m.ent.prog || 0; }
           if (m.t === 'ec') delete e.owner;
         }
         break;
@@ -327,7 +345,8 @@ export class Net {
     const zero = new Uint8Array(N);
     const packed = pack({
       v: PROTO, seed: w.seed, id: w.id, time: g.time, entrances: w.entrances, spawn: w.spawn, drops: g.drops.map(dropPub),
-      layers: w.layers.map((L) => ({ ground: L.ground, obj: L.obj, meta: L.meta, roof: L.roof, seen: zero })),
+      signs: w.signs.map((sm) => [...sm]),
+      layers: w.layers.map((L) => ({ ground: L.ground, obj: L.obj, meta: L.meta, roof: L.roof, rot: L.rot, seen: zero })),
     });
     const b64 = b64enc(await gzip(packed));
     if (!this.players.has(id)) return;
@@ -356,9 +375,7 @@ export class Net {
     if (!L) return;
     const o = L.obj[i], def = OBJ[o], m = L.meta[i], gm = w.grow[l];
     if (o !== prev) {
-      if (o !== O.CHEST && o !== O.FURNACE) w.ents[l].delete(i);
-      if (o === O.CHEST) g.ensureEnt(l, i, 'chest');
-      if (o === O.FURNACE) g.ensureEnt(l, i, 'furnace');
+      if (entType(o)) g.ensureEnt(l, i, entType(o)); else w.ents[l].delete(i);
     }
     if (def.grow && !(def.crop && m >= 3)) { if (!gm.has(i) || o !== prev) gm.set(i, rand(def.grow[0], def.grow[1])); }
     else if (def.harvest && m === 0) { if (!gm.has(i)) gm.set(i, rand(def.harvest.regrow[0], def.harvest.regrow[1])); }
@@ -422,7 +439,8 @@ export class Net {
           for (const t of m.a) {
             const prev = this.applyTile(t);
             this.fx(t[0], t[1], prev, t[3]);
-            if (this.owned && this.owned.l === t[0] && this.owned.i === t[1] && t[3] !== O.CHEST && t[3] !== O.FURNACE) { const e = this.owned.ent; this.owned = null; g.ui.entGone(e); }
+            const ow = this.owned;
+            if (ow && ow.l === t[0] && (ow.i === t[1] || ow.j === t[1]) && !entType(t[3])) { const e = ow.ent; this.owned = null; g.ui.entGone(e); }
           }
         } finally { this.applying = false; }
         break;
@@ -431,9 +449,20 @@ export class Net {
       case 'eg': {
         this.pendingEnt = null;
         this.owned = { l: m.l, i: m.i, ent: m.ent, sent: JSON.stringify(entPub(m.ent)) };
-        g.ui.open(m.ent.type, m.ent);
+        if (m.ent2) Object.assign(this.owned, { j: m.j, ent2: m.ent2, sent2: JSON.stringify(entPub(m.ent2)) });   // 큰 상자의 다른 반쪽
+        g.ui.open(m.ent.type, m.ent, m.ent2 || null);
         break;
       }
+      case 'sg': {
+        const L = g.world.layers[m.l], signs = g.world.signs[m.l];
+        if (!L || !L.obj[m.i]) break;
+        const text = cleanSign(m.text);
+        if (text || L.obj[m.i] !== O.SIGN) signs.set(m.i, text); else signs.delete(m.i);
+        break;
+      }
+      case 'sx':
+        if (g.world.layers[m.l]) { if (!g.removePlaque(m.i % MAP_W, (m.i / MAP_W) | 0, m.l, true)) g.world.signs[m.l].delete(m.i); }
+        break;
       case 'ex': this.pendingEnt = null; g.ui.toast(m.why === 'busy' ? '다른 플레이어가 쓰고 있어요' : '지금은 열 수 없어요'); g.audio.play('deny'); break;
       case 'tm': if (Math.abs(g.time - m.time) > 0.5) g.time = m.time; break;
       case 'ms': if (Array.isArray(m.a)) g.mobs.netApply(m.a); break;
@@ -454,11 +483,15 @@ export class Net {
     if (!o) return;
     const s = JSON.stringify(entPub(o.ent));
     if (s !== o.sent) { o.sent = s; this.send({ t: 'eu', l: o.l, i: o.i, ent: entPub(o.ent) }); }
+    if (!o.ent2) return;
+    const s2 = JSON.stringify(entPub(o.ent2));
+    if (s2 !== o.sent2) { o.sent2 = s2; this.send({ t: 'eu', l: o.l, i: o.j, ent: entPub(o.ent2) }); }
   }
   closeEnt() {
     const o = this.owned;
     if (!o) return;
     this.send({ t: 'ec', l: o.l, i: o.i, ent: entPub(o.ent) });
+    if (o.ent2) this.send({ t: 'ec', l: o.l, i: o.j, ent: entPub(o.ent2) });
     this.owned = null;
   }
 

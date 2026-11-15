@@ -1,13 +1,13 @@
 // DOM 기반 UI: HUD, 단축바, 가방·제작·화로·상자 창, 지도, 타이틀·일시정지 메뉴
 import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH, VERSION } from './config.js';
 import { GROUND } from './data/ground.js';
-import { O, OBJ, FLAG_COLORS, SAPLING_ITEMS } from './data/objects.js';
+import { O, OBJ, FLAG_COLORS, SAPLING_ITEMS, SIGN_LINES, SIGN_COLS } from './data/objects.js';
 import { hex } from './gfx/pix.js';
-import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES, SWORD_DMG } from './data/items.js';
+import { ITEMS, RECIPES, MACHINE, CATEGORY_NAMES, SWORD_DMG } from './data/items.js';
 import { MOBS } from './data/mobs.js';
 import { maxStack } from './inventory.js';
 import { QUESTS } from './quests.js';
-import { loadSave, listBackups, loadBackup, exportBlob, importFile, fileName, storageInfo, serialize } from './save.js';
+import { listWorlds, loadWorld, currentWorld, renameWorld, deleteWorld, listBackups, loadBackup, exportBlob, importFile, fileName, storageInfo, serialize } from './save.js';
 import { MAX_PLAYERS } from './net.js';
 
 const N = MAP_W * MAP_H;
@@ -19,6 +19,7 @@ const el = (tag, cls, html) => {
 };
 const MINI = 78;
 const ROOF_COLOR = 0xa8503a;
+const SIGN_FAR = 6.5;        // 이 거리(타일) 안의 표지판은 글이 보인다 (가까울수록 또렷하게)
 const flagHex = (m) => hex(FLAG_COLORS[m % FLAG_COLORS.length].c);
 const playerHex = (c) => hex(PLAYER_COLORS[c % PLAYER_COLORS.length]);
 const when = (ts) => { const d = new Date(ts), p = (n) => String(n).padStart(2, '0'); return `${d.getMonth() + 1}월 ${d.getDate()}일 ${p(d.getHours())}:${p(d.getMinutes())}`; };
@@ -38,10 +39,10 @@ export class UI {
     this.root = root; this.atlas = atlas; this.audio = audio;
     this.game = null; this.renderer = null;
     this.dirty = true; this.mapDirty = [true, true];
-    this.mode = null; this.ent = null; this.held = null;
+    this.mode = null; this.ent = null; this.ent2 = null; this.held = null;
     this.views = []; this.recViews = []; this.hotViews = [];
     this.titleOpen = true; this.pauseOpen = false; this.mapOpen = false; this.helpOpen = false; this.confirmOpen = false;
-    this.panel = null; this.chatOpen = false; this.labels = new Map();
+    this.panel = null; this.chatOpen = false; this.labels = new Map(); this.signLabs = new Map();
     this.cache = {}; this.mouse = { x: 0, y: 0 }; this.tipFor = null;
     this.mapAcc = 9; this.miniAcc = 9; this.nameT = 0; this.bannerT = 0;
     this.on = {};
@@ -56,6 +57,7 @@ export class UI {
     const r = this.root;
     r.innerHTML = `
       <div id="hud" class="hidden">
+        <div id="groggy" class="hidden"></div>
         <div id="status">
           <div id="clock"><span id="sun"></span><span id="clocktxt"></span></div>
           <div class="barlabel"><span>포만감</span><span id="hungertxt"></span></div>
@@ -63,10 +65,11 @@ export class UI {
         </div>
         <div id="quest"></div>
         <div id="mini"><canvas width="${MINI}" height="${MINI}"></canvas><div id="coords"></div><div id="room" class="hidden"></div></div>
+        <div id="signs"></div>
         <div id="names"></div>
         <div id="chat"></div>
         <input id="chatin" class="hidden" maxlength="120" placeholder="메시지를 쓰고 Enter (취소: Esc)" autocomplete="off">
-        <div id="hints"><b>WASD</b> 이동 · <b>좌클릭</b> 캐기/놓기 · <b>우클릭</b> 사용/먹기<br><b>E</b> 가방·제작 · <b>M</b> 지도 · <b>Q</b> 버리기 · <b>Esc</b> 메뉴</div>
+        <div id="hints"><b>WASD</b> 이동 · <b>좌클릭</b> 캐기/놓기 · <b>우클릭</b> 사용/먹기<br><b>E</b> 가방·제작 · <b>M</b> 지도 · <b>Q</b> 버리기 · <b>R</b> 돌리기 · <b>Esc</b> 메뉴</div>
         <div id="pickups"></div>
         <div id="hover" class="hidden"><canvas width="32" height="32"></canvas><span id="hovername"></span><span id="hoversub" class="sub"></span></div>
         <div id="prompt" class="hidden"></div>
@@ -88,12 +91,12 @@ export class UI {
         <div id="tagline">캐고 · 만들고 · 자동화해서 · 화성까지</div>
         <div class="menu">
           <button class="btn primary hidden" id="b-continue">이어하기</button>
-          <button class="btn" id="b-new">새 게임</button>
-          <div class="seedrow"><span>시드</span><input id="seed" placeholder="비워 두면 무작위" maxlength="18" spellcheck="false"></div>
+          <button class="btn" id="b-worlds" data-act="worlds">세계 목록 · 세이브 관리</button>
+          <button class="btn" id="b-new" data-act="newworld">새 세계 만들기</button>
           <button class="btn" data-act="join">친구 방에 참가</button>
-          <div class="row2"><button class="btn small" data-act="saves">세이브 관리</button><button class="btn small" data-act="help">조작법</button></div>
+          <div class="row2"><button class="btn small" data-act="help">조작법</button></div>
         </div>
-        <div id="foot">v${VERSION} · 지상과 지하 · 멀티플레이 · 소리를 켜고 즐겨 주세요</div>
+        <div id="foot">v${VERSION} · 지상과 지하 · 공장의 시작 · 멀티플레이 · 소리를 켜고 즐겨 주세요</div>
         <div id="credit">Developed by <b>Geonhee15</b> with <b>Claude Fable 5.2</b></div>
       </div>
       <div id="pause" class="hidden"><div class="shade"></div>
@@ -116,7 +119,8 @@ export class UI {
           <div class="keys">
             <kbd>W A S D / 방향키</kbd><span>이동</span>
             <kbd>좌클릭 (길게)</kbd><span>캐기 · 베기 · 동물 때리기 / 들고 있는 것 놓기 · 심기 · 갈기 · 다지기</span>
-            <kbd>우클릭</kbd><span>사용하기 (제작대·화로·상자·문·침대·동굴·열매 따기) / 먹기</span>
+            <kbd>우클릭</kbd><span>사용하기 (제작대·화로·압축기·상자·문·침대·표지판·동굴·열매 따기) / 먹기</span>
+            <kbd>R</kbd><span>가리킨 설치물을 시계 방향으로 돌리기 (들고 있을 때는 놓을 방향)</span>
             <kbd>1 ~ 9 · 마우스 휠</kbd><span>단축바 선택</span>
             <kbd>E · Tab</kbd><span>가방과 제작 창</span>
             <kbd>M</kbd><span>지도</span>
@@ -125,7 +129,7 @@ export class UI {
             <kbd>- · =</kbd><span>화면 확대 / 축소</span>
             <kbd>Esc</kbd><span>창 닫기 · 일시정지</span>
           </div>
-          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.<br><b>삽</b>을 들고 땅을 누른 채 끌면 길이 다져져요. 길 위에서는 조금 더 빨리 걷고, 지도에도 보입니다.<br>풀밭의 <b>동물</b>은 마우스로 가리키고 누르면 때립니다. <b>검</b>이 가장 세요. <b>울타리</b>는 동물도 나도 넘지 못하고, <b>울타리 문</b>은 나만 여닫을 수 있어요.<br>마우스로 가리킨 것의 이름은 화면 <b>오른쪽 아래</b>에 나옵니다.</div>
+          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.<br><b>삽</b>을 들고 땅을 누른 채 끌면 길이 다져져요. 길 위에서는 조금 더 빨리 걷고, 지도에도 보입니다.<br>풀밭의 <b>동물</b>은 마우스로 가리키고 누르면 때립니다. <b>검</b>이 가장 세요. <b>울타리</b>는 동물도 나도 넘지 못하고, <b>울타리 문</b>은 나만 여닫을 수 있어요.<br><b>표지판</b>은 빈 땅에 세우거나 블록에 대고 눌러 나무 판으로 붙이고, 글을 쓸 수 있어요. <b>상자</b> 두 개를 나란히 놓으면 큰 상자가 됩니다.<br>포만감이 바닥나면 <b>그로기</b> 상태가 되어 기어가듯 느려지고, 2분 안에 먹지 못하면 쓰러져요. 쓰러지면 가방의 물건을 그 자리에 쏟고, 리스폰 지점(우클릭한 <b>침대</b>)에서 다시 일어납니다.<br><b>컨베이어 벨트</b>는 놓인 방향(R로 돌림)으로 물건을 나릅니다. 앞에 붙은 상자·기계에는 넣고, 뒤에 붙은 상자·기계에서는 꺼내요. <b>압축기</b>는 재료 3개를 판 하나로 누릅니다.<br>마우스로 가리킨 것의 이름은 화면 <b>오른쪽 아래</b>에 나옵니다.</div>
         </div>
       </div>
       <div id="join" class="hidden"><div class="shade"></div>
@@ -146,9 +150,24 @@ export class UI {
       </div>
       <div id="saves" class="hidden"><div class="shade"></div>
         <div class="panel center" style="width:470px;max-width:94vw">
-          <div class="title-bar"><h2>세이브 관리</h2><button class="x" data-act="close">✕</button></div>
+          <div class="title-bar"><h2 id="saves-title">세이브 관리</h2><button class="x" data-act="close">✕</button></div>
           <div id="saves-body"></div>
           <input type="file" id="s-file" accept=".mfsave" class="hidden">
+        </div>
+      </div>
+      <div id="worlds" class="hidden"><div class="shade"></div>
+        <div class="panel center" style="width:470px;max-width:94vw">
+          <div class="title-bar"><h2>세계 목록</h2><button class="x" data-act="close">✕</button></div>
+          <div id="worlds-body"></div>
+        </div>
+      </div>
+      <div id="newworld" class="hidden"><div class="shade"></div>
+        <div class="panel center" style="width:350px;max-width:92vw">
+          <div class="title-bar"><h2>새 세계 만들기</h2><button class="x" data-act="close">✕</button></div>
+          <label class="field"><span>이름</span><input id="nw-name" maxlength="20" spellcheck="false" autocomplete="off"></label>
+          <label class="field"><span>시드</span><input id="nw-seed" maxlength="18" placeholder="비워 두면 무작위" spellcheck="false" autocomplete="off"></label>
+          <button class="btn primary" id="nw-go" style="width:100%;margin-top:10px">만들고 시작하기</button>
+          <div class="note">세계는 하나씩 따로 저장돼요. 새 세계를 만들어도 다른 세계는 그대로 남고, 타이틀 화면의 <b>세계 목록</b>에서 골라 플레이할 수 있어요.<br>같은 시드를 넣으면 같은 모양의 섬이 만들어집니다.</div>
         </div>
       </div>
       <div id="confirm" class="hidden"><div class="shade"></div>
@@ -186,8 +205,14 @@ export class UI {
       if (act === 'help') this.toggle('help');
       if (act === 'map') this.toggle('map');
       if (act === 'close') this.showPanel(null);
-      if (act === 'join' || act === 'saves' || act === 'mp') { this.audio.unlock(); this.showPanel(act); }
+      if (act === 'saves') this.savesKey = currentWorld();          // 플레이 중에 여는 세이브 관리는 지금 세계의 것
+      if (act === 'join' || act === 'saves' || act === 'mp' || act === 'worlds' || act === 'newworld') { this.audio.unlock(); this.showPanel(act); }
     });
+    const newGo = () => { this.audio.unlock(); this.audio.play('click'); if (this.on.new) this.on.new(this.$('nw-name').value, this.$('nw-seed').value.trim()); };
+    this.$('nw-go').addEventListener('click', newGo);
+    for (const id of ['nw-name', 'nw-seed']) this.$(id).addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) newGo(); });
+    // 글을 쓰는 칸에서는 게임 쪽 키 입력이 막혀 있으므로, 창 닫기(Esc)는 여기서 받는다
+    r.addEventListener('keydown', (e) => { if (e.key === 'Escape' && e.target.tagName === 'INPUT' && this.panel) { e.target.blur(); this.showPanel(null); } });
     this.$('j-go').addEventListener('click', () => {
       this.audio.unlock(); this.audio.play('click');
       const code = this.$('j-code').value.trim().toUpperCase();
@@ -204,7 +229,6 @@ export class UI {
     ci.addEventListener('blur', () => { if (this.chatOpen) this.closeChat(false); });
     const click = (id, fn) => this.$(id).addEventListener('click', () => { this.audio.unlock(); this.audio.play('click'); fn(); });
     click('b-continue', () => this.on.continue && this.on.continue());
-    click('b-new', () => this.on.new && this.on.new(this.$('seed').value.trim()));
     click('p-resume', () => this.togglePause(false));
     click('p-save', () => this.game.save(true));
     click('p-title', () => this.on.title && this.on.title());
@@ -232,7 +256,8 @@ export class UI {
   }
 
   // ── 슬롯 ──
-  arr(src) { return src === 'inv' ? this.game.inv.slots : this.ent ? this.ent.slots : []; }
+  // src: 'inv' 가방 · 'ent' 상자·화로 · 'ent2' 큰 상자의 뒤쪽 반
+  arr(src) { const e = src === 'ent2' ? this.ent2 : this.ent; return src === 'inv' ? this.game.inv.slots : e ? e.slots : []; }
   mkSlot(parent, src, i, kind) {
     const e = el('div', 'slot'), ico = el('div', 'ico'), cnt = el('div', 'cnt');
     e.append(ico, cnt); parent.append(e);
@@ -244,7 +269,7 @@ export class UI {
   }
   accepts(kind, id) {
     if (kind === 'fout') return false;
-    if (kind === 'fin') return !!SMELT[id];
+    if (kind === 'fin') return !!(MACHINE[this.mode] && MACHINE[this.mode][id]);
     if (kind === 'ffuel') return !!ITEMS[id].fuel;
     return true;
   }
@@ -287,10 +312,13 @@ export class UI {
   quickMove(v) {
     const arr = this.arr(v.src), s = arr[v.i], inv = this.game.inv.slots;
     let left = s.n;
-    if (v.src === 'ent') left = this.addTo(inv, 0, inv.length, s.id, s.n);
-    else if (this.mode === 'chest') left = this.addTo(this.ent.slots, 0, 27, s.id, s.n);
-    else if (this.mode === 'furnace') {
-      const f = this.ent.slots, smeltable = !!SMELT[s.id], fuel = !!ITEMS[s.id].fuel;
+    if (v.src !== 'inv') left = this.addTo(inv, 0, inv.length, s.id, s.n);
+    else if (this.mode === 'chest') {
+      left = this.addTo(this.ent.slots, 0, 27, s.id, s.n);
+      if (left > 0 && this.ent2) left = this.addTo(this.ent2.slots, 0, 27, s.id, left);
+    }
+    else if (MACHINE[this.mode]) {
+      const f = this.ent.slots, smeltable = !!MACHINE[this.mode][s.id], fuel = !!ITEMS[s.id].fuel;
       if (smeltable && (!f[0] || f[0].id === s.id || !fuel)) left = this.addTo(f, 0, 1, s.id, s.n);
       else if (fuel) left = this.addTo(f, 1, 2, s.id, s.n);
     }
@@ -323,14 +351,16 @@ export class UI {
   }
 
   // ── 창 ──
-  open(mode, ent) {
+  // ent2: 큰 상자를 열 때의 뒤쪽 반 (동 · 남쪽 칸)
+  open(mode, ent, ent2) {
     if (this.titleOpen || this.pauseOpen || this.mapOpen) return;
     if (this.mode) this.close(true);
-    this.mode = mode; this.ent = ent || null;
+    this.mode = mode; this.ent = ent || null; this.ent2 = ent2 || null;
     if (mode === 'flag') return this.openFlag(ent);
+    if (mode === 'sign') return this.openSign(ent);
     const win = (this.win = el('div')); win.id = 'window';
     const left = el('div', 'panel side'), right = el('div', 'panel');
-    const names = { inventory: '제작', workbench: '제작대', furnace: '화로', chest: '상자' };
+    const names = { inventory: '제작', workbench: '제작대', furnace: '화로', compressor: '압축기', chest: ent2 ? '큰 상자' : '상자' };
     const bar = el('div', 'title-bar', `<h2>${names[mode]}</h2>`);
     const x = el('button', 'x', '✕'); x.addEventListener('click', () => this.close()); bar.append(x);
     left.append(bar);
@@ -355,7 +385,7 @@ export class UI {
       left.append(el('div', 'note', mode === 'inventory'
         ? '밝게 표시된 것은 지금 만들 수 있어요. 클릭하면 제작합니다.<br>제작대를 설치하고 <b>우클릭</b>하면 도구·건축물도 만들 수 있어요.'
         : '클릭: 1번 제작 · Shift+클릭: 10번 제작'));
-    } else if (mode === 'furnace') {
+    } else if (MACHINE[mode]) {
       const f = el('div', 'furn');
       f.append(el('div', 'lab', '재료'), el('div'), el('div', 'lab', '결과'));
       this.views.push(this.mkSlot(f, 'ent', 0, 'fin'));
@@ -366,10 +396,13 @@ export class UI {
       f.append(el('div'));
       f.append(el('div', 'lab', '연료'));
       left.append(f);
-      left.append(el('div', 'note', '철광석·구리 광석·금광석은 주괴로, 원목은 숯으로, 버섯은 구운 버섯으로.<br>연료: 석탄 · 숯 · 원목 · 판자 · 막대기'));
+      left.append(el('div', 'note', mode === 'compressor'
+        ? '재료 <b>3개</b>를 눌러 판 하나로: 화강암 · 안산암 · 철 주괴 · 금 주괴 · 구리 주괴.<br>연료: 석탄 · 숯 · 원목 · 판자 · 막대기<br>컨베이어 벨트를 앞뒤에 붙이면 재료 · 연료를 넣고 판을 꺼내 줍니다.'
+        : '철광석·구리 광석·금광석은 주괴로, 원목은 숯으로, 버섯은 구운 버섯으로.<br>연료: 석탄 · 숯 · 원목 · 판자 · 막대기'));
     } else if (mode === 'chest') {
       const gr = el('div', 'grid');
       for (let i = 0; i < 27; i++) this.views.push(this.mkSlot(gr, 'ent', i, 'chest'));
+      if (ent2) for (let i = 0; i < 27; i++) this.views.push(this.mkSlot(gr, 'ent2', i, 'chest'));
       left.append(gr);
       left.style.maxWidth = 'none';
     }
@@ -406,6 +439,39 @@ export class UI {
     this.root.insertBefore(win, this.heldEl);
     this.audio.play('open');
   }
+  // 표지판 · 나무 판에 글 쓰기
+  openSign(pos) {
+    const g = this.game, w = g.world;
+    const cur = w.signs[pos.l].get(w.idx(pos.x, pos.y)) || '', plaque = w.obj(pos.l, pos.x, pos.y) !== O.SIGN;
+    const win = (this.win = el('div')); win.id = 'window';
+    const panel = el('div', 'panel'); panel.style.width = '310px';
+    const bar = el('div', 'title-bar', `<h2>${plaque ? '나무 판에 글 쓰기' : '표지판에 글 쓰기'}</h2>`);
+    const x = el('button', 'x', '✕'); x.addEventListener('click', () => this.close()); bar.append(x);
+    const ta = el('textarea', 'signin'); ta.rows = SIGN_LINES; ta.spellcheck = false; ta.value = cur; ta.maxLength = SIGN_LINES * (SIGN_COLS + 6);
+    const warn = el('div', 'status');
+    const done = () => { g.setSign(pos.l, pos.x, pos.y, ta.value); this.close(true); };
+    const check = () => {
+      const lines = ta.value.split('\n'), long = lines.findIndex((s) => [...s].length > SIGN_COLS);
+      warn.classList.toggle('bad', long >= 0 || lines.length > SIGN_LINES);
+      warn.textContent = lines.length > SIGN_LINES ? `${SIGN_LINES}줄까지만 적혀요` : long >= 0 ? `${long + 1}번째 줄이 ${SIGN_COLS}자를 넘어요 (넘는 글자는 잘려요)` : '';
+    };
+    ta.addEventListener('input', check);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
+      else if (e.key === 'Enter' && !e.isComposing && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(); }
+      else if (e.key === 'Enter' && !e.isComposing && ta.value.split('\n').length >= SIGN_LINES) e.preventDefault();   // 줄은 더 늘리지 않는다
+    });
+    const row = el('div', 'btnrow');
+    const no = el('button', 'btn small', '취소'), ok = el('button', 'btn small primary', '쓰기');
+    no.addEventListener('click', () => this.close());
+    ok.addEventListener('click', () => { this.audio.play('click'); done(); });
+    row.append(no, ok);
+    panel.append(bar, ta, warn, row, el('div', 'note', `${SIGN_LINES}줄까지, 한 줄에 ${SIGN_COLS}자까지 쓸 수 있어요. <b>Ctrl+Enter</b>로도 쓰기가 됩니다.<br>적은 글은 가까이 가거나 마우스로 가리키면 그 위에 보여요.`));
+    win.append(panel);
+    this.root.insertBefore(win, this.heldEl);
+    this.audio.play('open');
+    setTimeout(() => { if (ta.isConnected) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 30);
+  }
   close(silent) {
     if (!this.mode) return;
     if (this.held) {
@@ -413,14 +479,14 @@ export class UI {
       if (left > 0) this.game.spawnDrop(this.held.id, left, this.game.player.x, this.game.player.y - 4);
       this.held = null;
     }
-    const ent = this.ent, wasEnt = this.mode === 'chest' || this.mode === 'furnace';
+    const ent = this.ent, ent2 = this.ent2, wasEnt = this.mode === 'chest' || !!MACHINE[this.mode];
     this.win.remove(); this.win = null;
-    this.mode = null; this.ent = null; this.views = []; this.recViews = [];
-    if (wasEnt) this.game.entClosed(ent);
+    this.mode = null; this.ent = null; this.ent2 = null; this.views = []; this.recViews = [];
+    if (wasEnt) this.game.entClosed(ent, ent2);
     this.hideTip(); this.dirty = true;
     if (!silent) this.audio.play('close');
   }
-  entGone(e) { if (this.ent === e) this.close(true); }
+  entGone(e) { if (this.ent === e || this.ent2 === e) this.close(true); }
 
   // ── 툴팁 ──
   hideTip() { this.tipFor = null; this.tip.classList.add('hidden'); this.cache.tip = null; }
@@ -432,7 +498,9 @@ export class UI {
     if (it.tool) x += `<div class="tx">${['', '나무', '돌', '철'][it.tier]} 등급 ${it.tool === 'sword' ? '무기' : '도구'}</div>`;
     if (it.tool === 'sword') x += `<div class="tx ok">공격력 ${SWORD_DMG[it.tier]}</div>`;
     if (it.roof) x += '<div class="tx">들고 있으면 지붕이 비쳐 보여요.<br>빈 곳 클릭: 덮기 · 지붕 클릭: 걷어 내기 (끌어서 연속)</div>';
+    if (it.sign) x += '<div class="tx">빈 땅 클릭: 세우기 · 블록 클릭: 그 블록에 나무 판으로 붙이기</div>';
     if (it.place || it.seed) x += `<div class="tx">단축바에서 고르고 클릭하면 ${it.seed ? '심을' : '놓을'} 수 있어요</div>`;
+    if (it.place && it.place.obj && OBJ[it.place.obj].rot) x += '<div class="tx">R: 놓을 방향 돌리기 · 놓은 뒤에도 가리키고 R</div>';
     return `<div class="tn">${it.name}</div><div class="td">${it.desc}</div>${x}`;
   }
   updateTip() {
@@ -499,15 +567,21 @@ export class UI {
   }
 
   // ── 화면 전환 ──
-  showTitle(hasSave) {
+  // worlds: 저장된 세계 목록 (최근에 플레이한 것이 앞)
+  showTitle(worlds) {
+    const hasSave = !!(worlds && worlds.length);
     this.close(true);
     this.showPanel(null); if (this.chatOpen) this.closeChat(false);
     this.$('chat').innerHTML = ''; for (const lab of this.labels.values()) lab.remove(); this.labels.clear();
+    for (const lab of this.signLabs.values()) lab.el.remove(); this.signLabs.clear();
+    this.$('groggy').classList.add('hidden');
     this.titleOpen = true; this.pauseOpen = false; this.mapOpen = false;
     this.$('title').classList.remove('hidden'); this.$('pause').classList.add('hidden'); this.$('mapview').classList.add('hidden');
     this.hud.classList.add('hidden');
     this.$('b-continue').classList.toggle('hidden', !hasSave);
+    this.$('b-continue').textContent = hasSave ? `이어하기 — ${worlds[0].name}` : '이어하기';
     this.$('b-new').classList.toggle('primary', !hasSave);
+    this.worldCount = hasSave ? worlds.length : 0;
     this.$('loading').classList.add('hidden');
   }
   hideTitle() {
@@ -529,8 +603,10 @@ export class UI {
 
   // ── 패널: 방 참가 · 멀티플레이 · 세이브 관리 ──
   showPanel(name) {
-    for (const n of ['join', 'mp', 'saves']) this.$(n).classList.toggle('hidden', n !== name);
+    for (const n of ['join', 'mp', 'saves', 'worlds', 'newworld']) this.$(n).classList.toggle('hidden', n !== name);
     this.panel = name;
+    if (name === 'worlds') this.renderWorlds();
+    if (name === 'newworld') { const i = this.$('nw-name'); i.value = `세계 ${(this.worldCount || 0) + 1}`; this.$('nw-seed').value = ''; setTimeout(() => { i.focus(); i.select(); }, 30); }
     if (name === 'join') { this.$('j-name').value = this.game.net.name; this.joinStatus(''); setTimeout(() => this.$('j-code').focus(), 30); }
     if (name === 'mp') this.renderMp();
     if (name === 'saves') this.renderSaves();
@@ -590,13 +666,42 @@ export class UI {
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
+  // 세계 목록 (타이틀 화면): 골라서 플레이하거나, 세계마다 세이브를 관리한다
+  async renderWorlds() {
+    const box = this.$('worlds-body');
+    box.innerHTML = '<div class="note first">불러오는 중…</div>';
+    const list = await listWorlds();
+    if (this.panel !== 'worlds') return;
+    box.innerHTML = '';
+    this.worldCount = list.length;
+    if (!list.length) box.append(el('div', 'note first', '아직 만든 세계가 없어요.'));
+    for (const w of list) {
+      const r = el('div', 'srow'), t = el('div', 'stxt'), nm = el('div'), bs = el('div', 'sbtn');
+      nm.textContent = w.name;
+      t.append(nm, el('div', 'sub', `${w.day || 1}일차 · ${when(w.savedAt)} 저장`));
+      const play = el('button', 'btn small primary', '플레이'), man = el('button', 'btn small', '관리');
+      play.addEventListener('click', () => { this.audio.unlock(); this.audio.play('click'); if (this.on.play) this.on.play(w.key); });
+      man.addEventListener('click', () => { this.audio.play('click'); this.savesKey = w.key; this.showPanel('saves'); });
+      bs.append(play, man); r.append(t, bs); box.append(r);
+    }
+    const mk = el('button', 'btn small', '새 세계 만들기'), imp = el('button', 'btn small', '세이브 파일(.mfsave)에서 불러오기');
+    mk.style.cssText = 'width:100%;margin-top:12px'; imp.style.cssText = 'width:100%;margin-top:6px';
+    mk.addEventListener('click', () => { this.audio.play('click'); this.showPanel('newworld'); });
+    imp.addEventListener('click', () => { this.audio.play('click'); this.$('s-file').click(); });
+    box.append(mk, imp, el('div', 'note', '<b>관리</b>에서 이름 바꾸기 · 백업으로 되돌리기 · 파일로 내보내기 · 지우기를 할 수 있어요.<br>세이브 파일을 불러오면 새 세계로 목록에 더해지고, 다른 세계는 그대로 남습니다.'));
+  }
+  // 세이브 관리: this.savesKey 세계 하나의 이름 · 지금 세이브 · 자동 백업
   async renderSaves() {
-    const box = this.$('saves-body'), g = this.game, playing = g.state === 'play' && !g.net.isGuest;
+    const box = this.$('saves-body'), g = this.game, key = this.savesKey;
+    const playing = g.state === 'play' && !g.net.isGuest && key === currentWorld();
     box.innerHTML = '<div class="note first">불러오는 중…</div>';
     if (playing) await g.save();
-    const [cur, baks, info] = await Promise.all([loadSave(), listBackups(), storageInfo()]);
+    const [worlds, cur, baks, info] = await Promise.all([listWorlds(), loadWorld(key), listBackups(key), storageInfo()]);
     if (this.panel !== 'saves') return;
+    const w = worlds.find((x) => x.key === key);
     box.innerHTML = '';
+    this.$('saves-title').textContent = w ? `세이브 관리 — ${w.name}` : '세이브 관리';
+    if (!w) { box.append(el('div', 'note first', '이 세계를 찾지 못했어요.')); return; }
     const row = (title, sub, buttons) => {
       const r = el('div', 'srow'), t = el('div', 'stxt');
       t.append(el('div', '', title), el('div', 'sub', sub));
@@ -606,29 +711,61 @@ export class UI {
     };
     const exportOf = (getData) => async (btn) => {
       btn.disabled = true;
-      try { const d = await getData(); this.download(await exportBlob(d), fileName(d)); this.toast('세이브 파일을 내려받았어요', 'good'); }
+      try { const d = { ...(await getData()), name: w.name }; this.download(await exportBlob(d), fileName(d)); this.toast('세이브 파일을 내려받았어요', 'good'); }
       catch (e) { console.warn(e); this.toast('파일을 만들지 못했어요'); }
       btn.disabled = false;
     };
+    // 이름
+    box.append(el('div', 'cat', '세계 이름'));
+    {
+      const f = el('div', 'namerow'), inp = el('input'), b = el('button', 'btn small', '이름 바꾸기');
+      inp.maxLength = 20; inp.value = w.name; inp.spellcheck = false;
+      const go = async () => {
+        this.audio.play('click');
+        const nw = await renameWorld(key, inp.value);
+        if (!nw) return;
+        if (playing) g.worldName = nw.name;
+        this.toast(`세계 이름을 '${nw.name}'(으)로 바꿨어요`, 'good');
+        if (this.panel === 'saves') this.renderSaves();
+      };
+      b.addEventListener('click', go);
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
+      f.append(inp, b); box.append(f);
+    }
     box.append(el('div', 'cat', '지금 세이브'));
     if (cur) row(`${Math.floor(cur.time / DAY_LENGTH) + 1}일차`, `${when(cur.savedAt)} 저장`, [['파일로 내보내기', exportOf(async () => (playing ? serialize(g) : cur)), 'primary']]);
-    else box.append(el('div', 'note first', '아직 저장된 세계가 없어요.'));
-    box.append(el('div', 'cat', `자동 백업 (최근 ${baks.length}개 · 10분마다, 그리고 덮어쓰기 직전에)`));
+    else box.append(el('div', 'note first', '저장된 내용이 없어요.'));
+    box.append(el('div', 'cat', `자동 백업 (최근 ${baks.length}개 · 10분마다, 그리고 되돌리기 직전에)`));
     if (!baks.length) box.append(el('div', 'note first', '아직 백업이 없어요. 플레이하면 자동으로 쌓입니다.'));
     for (const b of baks) {
       row(`${b.day}일차 <span class="tag">${REASON[b.reason] || b.reason}</span>`, when(b.at), [
-        ['되돌리기', () => this.confirm(`${when(b.at)}의 백업(${b.day}일차)으로 되돌릴까요?<br>지금 세이브는 백업으로 옮겨 둡니다.`, async () => { const d = await loadBackup(b.key); if (d && this.on.restore) this.on.restore(d, 'restore'); })],
+        ['되돌리기', () => this.confirm(`${when(b.at)}의 백업(${b.day}일차)으로 되돌릴까요?<br>지금 세이브는 백업으로 옮겨 둡니다.`, async () => { const d = await loadBackup(b.key); if (d && this.on.restore) this.on.restore(key, d); })],
         ['파일', exportOf(() => loadBackup(b.key))],
       ]);
     }
-    const imp = el('button', 'btn small', '세이브 파일(.mfsave)에서 불러오기'); imp.style.cssText = 'width:100%;margin-top:12px';
-    imp.addEventListener('click', () => { this.audio.play('click'); this.$('s-file').click(); });
-    box.append(imp, el('div', 'note', `세이브는 쿠키가 아니라 이 브라우저의 저장소(IndexedDB)에 들어 있어요. 브라우저에서 사이트 데이터를 지우거나 다른 기기로 옮기면 따라오지 않으니, <b>아끼는 세계는 파일로 내보내</b> 두세요. 파일은 어느 컴퓨터·브라우저에서든 다시 불러올 수 있습니다.<br>브라우저 보호 저장: <b>${info.persisted ? '켜짐' : '꺼짐'}</b>${info.persisted ? '' : ' (브라우저가 허용하면 자동으로 켜져요)'} · 사용 중 ${(info.usage / 1048576).toFixed(1)}MB`));
+    if (g.state !== 'play') {
+      // 타이틀 화면에서만: 세계 지우기, 목록으로 돌아가기
+      const back = el('button', 'btn small', '← 세계 목록'), rm = el('button', 'btn small', '이 세계 지우기');
+      back.style.cssText = 'width:100%;margin-top:12px'; rm.style.cssText = 'width:100%;margin-top:6px;color:var(--bad)';
+      back.addEventListener('click', () => { this.audio.play('click'); this.showPanel('worlds'); });
+      rm.addEventListener('click', () => {
+        this.audio.play('click');
+        this.confirm(`<b>${w.name.replace(/[<&]/g, '')}</b> 세계와 그 백업 ${baks.length}개를 모두 지울까요?<br><b style="color:var(--bad)">지우면 되돌릴 수 없어요.</b> 남겨 두고 싶다면 먼저 파일로 내보내세요.`, async () => {
+          await deleteWorld(key);
+          this.toast('세계를 지웠어요');
+          if (this.on.worldsChanged) await this.on.worldsChanged();
+          this.showPanel('worlds');
+        });
+      });
+      box.append(back, rm);
+    }
+    box.append(el('div', 'note', `세이브는 쿠키가 아니라 이 브라우저의 저장소(IndexedDB)에 세계마다 따로 들어 있어요. 브라우저에서 사이트 데이터를 지우거나 다른 기기로 옮기면 따라오지 않으니, <b>아끼는 세계는 파일로 내보내</b> 두세요. 파일은 어느 컴퓨터·브라우저에서든 <b>세계 목록</b>에서 다시 불러올 수 있습니다.<br>브라우저 보호 저장: <b>${info.persisted ? '켜짐' : '꺼짐'}</b>${info.persisted ? '' : ' (브라우저가 허용하면 자동으로 켜져요)'} · 사용 중 ${(info.usage / 1048576).toFixed(1)}MB`));
   }
+  // 세이브 파일은 새 세계로 불러온다 (다른 세계를 덮어쓰지 않는다)
   async importSave(file) {
     try {
       const d = await importFile(file);
-      this.confirm(`세이브 파일의 세계(${Math.floor(d.time / DAY_LENGTH) + 1}일차, ${when(d.savedAt)} 저장)를 불러올까요?<br>지금 세이브는 백업으로 옮겨 둡니다.`, () => { if (this.on.restore) this.on.restore(d, 'import'); });
+      this.confirm(`세이브 파일의 세계(${d.name ? d.name.replace(/[<&]/g, '') + ' · ' : ''}${Math.floor(d.time / DAY_LENGTH) + 1}일차, ${when(d.savedAt)} 저장)를 불러올까요?<br>새 세계로 목록에 더해지고, 다른 세계는 그대로 남습니다.`, () => { if (this.on.import) this.on.import(d); });
     } catch (e) { console.warn(e); this.toast('마인 팩토리 세이브 파일이 아니거나 손상됐어요'); this.audio.play('deny'); }
   }
 
@@ -807,16 +944,44 @@ export class UI {
       const def = OBJ[o];
       if (def.wall && L === CAVE && !w.exposed(L, c.x, c.y)) return null;
       let name = def.name, sub = '';
+      const plq = w.plaque(L, i), txt = w.signs[L].get(i) || '';
       if (o === O.SAPLING) name = (ITEMS[SAPLING_ITEMS[meta]] || def).name;
       else if (o === O.FLAG && FLAG_COLORS[meta]) name = `${FLAG_COLORS[meta].name} 깃발`;
+      else if (o === O.CHEST && meta) name = '큰 상자';
       if (def.crop) sub = meta >= 3 ? '다 자람' : '자라는 중';
       else if (def.harvest && meta) sub = def.harvest.item === 'apple' ? '사과 열림' : '열매 열림';
-      return { key: `o${o}:${meta}`, name, sub, spr: this.renderer.objSprite(def, meta, c.x, c.y), far };
+      else if (o === O.SIGN && !txt) sub = '빈 표지판';
+      if (plq) sub = sub ? `${sub} · 표지판 붙음` : '표지판 붙음';
+      return { key: `o${o}:${meta}:${Lr.rot[i]}:${plq ? 1 : 0}${txt ? 't' : ''}`, name, sub, spr: this.renderer.objSprite(def, meta, c.x, c.y), far };
     }
     const gid = Lr.ground[i], gd = GROUND[gid];
     if (!gd || !gd.name) return null;
     const gs = this.renderer.gs[gid] && this.renderer.gs[gid][0];
     return { key: 'g' + gid, name: gd.name, spr: Array.isArray(gs) ? gs[0] : gs, far };
+  }
+
+  // 표지판 글: 가까이 있거나 가리키고 있는 표지판 · 나무 판의 글을 그 위에 작은 나무 판으로 띄운다
+  updateSigns() {
+    const g = this.game, r = this.renderer, w = g.world, L = g.layer, signs = w.signs[L], labs = this.signLabs;
+    if (!signs.size && !labs.size) return;
+    const p = g.player, c = g.cursor, Lr = w.layers[L], box = this.$('signs'), shown = new Set();
+    const hi = c && !c.roof && !this.blocking && w.inb(c.x, c.y) ? w.idx(c.x, c.y) : -1;
+    for (const [i, text] of signs) {
+      if (!text) continue;
+      const x = i % MAP_W, y = (i / MAP_W) | 0, cx = x * TILE + 8;
+      const a = i === hi ? 1 : Math.min(1, (SIGN_FAR - Math.hypot(cx - p.x, y * TILE + 8 - (p.y - 6)) / TILE) / 1.5);
+      if (a <= 0 || g.roofBlocks(x, y) || (L === CAVE && !Lr.seen[i])) continue;      // 멀거나, 닫힌 지붕 아래거나, 아직 못 본 곳
+      const sx = (cx - r.ox) * r.zoom, sy = (y * TILE + (Lr.obj[i] === O.SIGN ? -2 : 6) - r.oy) * r.zoom;   // 판 바로 위
+      if (sx < -140 || sx > innerWidth + 140 || sy < 0 || sy > innerHeight + 90) continue;
+      let lab = labs.get(i);
+      if (!lab) { lab = { el: el('div', 'sg'), text: null, a: '' }; box.append(lab.el); labs.set(i, lab); }
+      if (lab.text !== text) { lab.text = text; lab.el.textContent = text; }
+      const as = a.toFixed(2) + (i === hi ? '!' : '');
+      if (lab.a !== as) { lab.a = as; lab.el.style.opacity = a.toFixed(2); lab.el.style.zIndex = i === hi ? 2 : 1; }
+      lab.el.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
+      shown.add(i);
+    }
+    for (const [i, lab] of labs) if (!shown.has(i)) { lab.el.remove(); labs.delete(i); }
   }
 
   update(dt) {
@@ -831,11 +996,16 @@ export class UI {
     const txt = `${g.day}일차 · ${hh < 12 ? '오전' : '오후'} ${hh % 12 === 0 ? 12 : hh % 12}:${String(mm).padStart(2, '0')}${g.layer === CAVE ? ' · 지하' : ''}`;
     set('clock', txt, (v) => { this.$('clocktxt').textContent = v; });
     set('moon', g.night, (v) => this.$('sun').classList.toggle('moon', v));
-    const hu = Math.ceil(g.player.hunger);
-    set('hunger', hu, (v) => {
-      this.$('hungerbar').firstChild.style.width = v + '%';
-      this.$('hungerbar').classList.toggle('low', v <= 20);
-      this.$('hungertxt').textContent = v <= 0 ? '배고파서 힘이 없어요!' : v <= 20 ? '배고파요' : '';
+    // 그로기(포만감 0): 쓰러지기까지 남은 시간을 보여 주고, 화면 가장자리가 점점 붉게 어두워진다
+    const hu = Math.ceil(g.player.hunger), gr = g.player.groggy > 0 ? Math.ceil(g.player.groggy) : 0;
+    set('hunger', hu + '|' + gr, () => {
+      this.$('hungerbar').firstChild.style.width = hu + '%';
+      this.$('hungerbar').classList.toggle('low', hu <= 20);
+      const t = this.$('hungertxt'), v = this.$('groggy');
+      t.textContent = gr ? `그로기! 쓰러지기까지 ${Math.floor(gr / 60)}:${String(gr % 60).padStart(2, '0')}` : hu <= 20 ? '배고파요' : '';
+      t.classList.toggle('danger', !!gr);
+      v.classList.toggle('hidden', !gr);
+      if (gr) v.style.opacity = (0.4 + 0.6 * (1 - gr / 120)).toFixed(2);
     });
     // 목표
     const q = QUESTS[g.quest], pr = q.prog ? q.prog(g) : null;
@@ -890,9 +1060,10 @@ export class UI {
         if (vis) lab.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
       }
     }
+    this.updateSigns();
     // 화로 게이지
-    if (this.mode === 'furnace' && this.ent) {
-      const e = this.ent, rec = e.slots[0] ? SMELT[e.slots[0].id] : null;
+    if (MACHINE[this.mode] && this.ent) {
+      const e = this.ent, rec = e.slots[0] ? MACHINE[this.mode][e.slots[0].id] : null;
       this.arrowEl.style.width = (rec ? Math.min(100, (e.prog / rec.time) * 100) : 0) + '%';
       this.flameEl.style.width = (e.burnMax ? Math.max(0, (e.burn / e.burnMax) * 100) : 0) + '%';
       if (e.touched) { e.touched = false; this.dirty = true; }

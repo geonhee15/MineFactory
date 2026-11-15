@@ -514,23 +514,51 @@ function crystal(seed) {
 }
 
 // ── 설치물 ─────────────────────────────────────────────────
-function workbench() {
-  const p = new Pix(16, 20), g = PAL.plank;
+// r: 바라보는 방향 (0 남 = 화면 쪽 · 1 서 · 2 북 · 3 동). R 키로 시계 방향으로 돈다
+const IRON = { l: 0xa3a8b1, b: 0x70757f, d: 0x5a5e68, k: 0x44474f }, GOLD = { l: 0xfff1a0, b: 0xf2c53d, d: 0xb98a1e };
+// 그림을 시계 방향으로 90도씩 n번 돌린다
+function rotN(src, n) {
+  let p = src;
+  for (let k = 0; k < (n & 3); k++) {
+    const q = new Pix(p.h, p.w);
+    for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) { const i = y * p.w + x; if (p.c[i] >= 0) q.set(p.h - 1 - y, x, p.c[i], p.a[i]); }
+    p = q;
+  }
+  return p;
+}
+// 그림의 한 부분만 잘라 낸다
+function sub(src, x0, y0, w, h) {
+  const p = new Pix(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y0 + y) * src.w + x0 + x; if (src.c[i] >= 0) p.set(x, y, src.c[i], src.a[i]); }
+  return p;
+}
+function workbench(r = 0) {
+  const p = new Pix(16, 20), g = PAL.plank, st = 0x8a8f99, sl = 0xb9bec8, sd = 0x70757f, wd = 0x7a5536;
   p.ellipse(8, 18.5, 7.5, 1.5, 0x000000, 55);
   p.rect(1, 4, 14, 7, g.l);                      // 상판
   p.rect(1, 4, 14, 1, g.hi);
-  for (let x = 4; x < 15; x += 4) p.rect(x, 5, 1, 6, g.b);
+  if (r & 1) for (const y of [6, 8]) p.rect(1, y, 14, 1, g.b);          // 옆으로 돌리면 널빤지 결도 돈다
+  else for (let x = 4; x < 15; x += 4) p.rect(x, 5, 1, 6, g.b);
   p.rect(1, 11, 14, 3, g.d); p.rect(1, 11, 14, 1, g.b);   // 앞판
   p.rect(1, 14, 3, 5, g.d); p.rect(12, 14, 3, 5, g.d);     // 다리
   p.rect(2, 14, 1, 5, g.b); p.rect(13, 14, 1, 5, g.b);
-  p.rect(4, 15, 8, 1, g.dd);
+  if (r === 0) p.rect(4, 15, 8, 1, g.dd);                  // 앞쪽 가로대
+  if (r === 2) { p.rect(4, 14, 8, 3, g.dd); p.rect(4, 14, 8, 1, g.d); }   // 뒤쪽은 판으로 막혀 있다
   // 망치와 톱
-  p.rect(3, 6, 3, 2, 0x8a8f99); p.set(3, 6, 0xb9bec8); p.rect(4, 8, 1, 2, 0x7a5536);
-  p.rect(8, 7, 5, 1, 0xb9bec8); p.rect(8, 8, 5, 1, 0x70757f); p.rect(12, 6, 2, 3, 0x7a5536);
+  if (r === 0) {
+    p.rect(3, 6, 3, 2, st); p.set(3, 6, sl); p.rect(4, 8, 1, 2, wd);
+    p.rect(8, 7, 5, 1, sl); p.rect(8, 8, 5, 1, sd); p.rect(12, 6, 2, 3, wd);
+  } else if (r === 2) {
+    p.rect(10, 7, 3, 2, st); p.set(10, 7, sl); p.rect(11, 5, 1, 2, wd);
+    p.rect(3, 6, 5, 1, sl); p.rect(3, 7, 5, 1, sd); p.rect(2, 6, 2, 3, wd);
+  } else {
+    p.rect(11, 5, 2, 3, st); p.set(11, 5, sl); p.rect(8, 6, 3, 1, wd);          // 망치는 뒤쪽에 가로로
+    p.rect(4, 7, 1, 3, sl); p.rect(5, 7, 1, 3, sd); p.rect(3, 5, 3, 2, wd);    // 톱은 앞쪽에 세로로
+  }
   p.outline(K);
-  return p;
+  return r === 3 ? p.flip() : p;
 }
-function furnace(lit, frame = 0) {
+function furnace(lit, frame = 0, r = 0) {
   const p = new Pix(16, 20), g = PAL.stone;
   p.ellipse(8, 18.5, 7.5, 1.5, 0x000000, 55);
   p.rect(1, 3, 14, 5, g.l); p.rect(1, 3, 14, 1, g.hi);      // 윗면
@@ -538,25 +566,73 @@ function furnace(lit, frame = 0) {
   p.rect(1, 8, 14, 11, g.b);                                 // 앞면
   for (let y = 8; y < 19; y += 4) for (let x = 1; x < 15; x++) p.set(x, y, g.d);
   for (let y = 8; y < 19; y++) { const off = ((y - 8) >> 2) % 2 ? 4 : 0; for (let x = 1 + off; x < 15; x += 8) p.set(x, y, g.d); }
-  p.rect(4, 11, 8, 6, g.k); p.rect(5, 10, 6, 1, g.k);       // 아궁이
-  if (lit) {
-    p.rect(5, 12, 6, 5, 0xd9461e); p.rect(6, 13, 4, 4, 0xff8a2a); p.rect(7, 14 + (frame % 2), 2, 3 - (frame % 2), 0xffd95a);
-    p.set(5 + frame * 2, 12, 0xff8a2a); p.set(10 - frame, 11, 0xd9461e);
-  } else { p.rect(5, 12, 6, 5, 0x1c1a20); p.rect(6, 15, 4, 2, 0x35323a); }
+  if (r === 0) {
+    p.rect(4, 11, 8, 6, g.k); p.rect(5, 10, 6, 1, g.k);       // 아궁이
+    if (lit) {
+      p.rect(5, 12, 6, 5, 0xd9461e); p.rect(6, 13, 4, 4, 0xff8a2a); p.rect(7, 14 + (frame % 2), 2, 3 - (frame % 2), 0xffd95a);
+      p.set(5 + frame * 2, 12, 0xff8a2a); p.set(10 - frame, 11, 0xd9461e);
+    } else { p.rect(5, 12, 6, 5, 0x1c1a20); p.rect(6, 15, 4, 2, 0x35323a); }
+  } else if (r === 2) {
+    p.rect(6, 10, 4, 3, g.k);                                // 뒷면: 작은 바람구멍만 보인다
+    if (lit) { p.rect(7, 11, 2, 1, 0xff8a2a); p.set(7 + (frame % 2), 11, 0xffd95a); } else p.rect(7, 11, 2, 1, 0x1c1a20);
+  } else {
+    p.rect(1, 10, 2, 7, g.k);                                // 옆모습: 아궁이는 왼쪽 모서리에 살짝 보인다 (동쪽은 뒤집어서)
+    if (lit) { p.rect(1, 12, 1, 4, 0xff8a2a); p.set(1, 13 + (frame % 2), 0xffd95a); p.set(2, 12 + frame, 0xd9461e); p.set(2, 15, 0xd9461e); }
+    else p.rect(1, 12, 1, 4, 0x1c1a20);
+  }
   p.outline(K);
-  return p;
+  return r === 3 ? p.flip() : p;
 }
-function chest() {
+function chest(r = 0) {
   const p = new Pix(16, 18), g = PAL.plank;
   p.ellipse(8, 16.5, 7.5, 1.5, 0x000000, 55);
   p.rect(1, 3, 14, 5, g.l); p.rect(1, 3, 14, 1, g.hi); p.rect(1, 7, 14, 1, g.d);   // 뚜껑
   p.rect(1, 8, 14, 9, g.b); p.rect(1, 16, 14, 1, g.d);
-  for (let x = 5; x < 15; x += 5) p.rect(x, 9, 1, 7, g.d);
-  p.rect(1, 3, 2, 14, 0x70757f); p.rect(13, 3, 2, 14, 0x70757f); p.rect(1, 3, 1, 14, 0xa3a8b1); p.rect(13, 3, 1, 14, 0xa3a8b1);
-  p.rect(1, 8, 14, 1, 0x5a5e68);
-  p.rect(7, 7, 2, 4, 0xf2c53d); p.set(7, 7, 0xfff1a0); p.set(8, 10, 0xb98a1e);
+  if (r & 1) {
+    // 옆모습: 널빤지 결이 가로로 보이고, 쇠띠는 가운데 한 줄. 걸쇠는 바라보는 쪽 모서리에 살짝 보인다
+    for (const y of [11, 14]) p.rect(1, y, 14, 1, g.d);
+    p.rect(7, 3, 2, 14, IRON.b); p.rect(7, 3, 1, 14, IRON.l);
+    p.rect(1, 8, 14, 1, IRON.d);
+    p.rect(1, 7, 1, 4, GOLD.b); p.set(1, 7, GOLD.l);
+  } else {
+    for (let x = 5; x < 15; x += 5) p.rect(x, 9, 1, 7, g.d);
+    p.rect(1, 3, 2, 14, IRON.b); p.rect(13, 3, 2, 14, IRON.b); p.rect(1, 3, 1, 14, IRON.l); p.rect(13, 3, 1, 14, IRON.l);
+    p.rect(1, 8, 14, 1, IRON.d);
+    if (r === 0) { p.rect(7, 7, 2, 4, GOLD.b); p.set(7, 7, GOLD.l); p.set(8, 10, GOLD.d); }   // 걸쇠
+    else { p.rect(4, 7, 2, 2, IRON.k); p.rect(10, 7, 2, 2, IRON.k); }                          // 뒷면: 경첩
+  }
   p.outline(K);
-  return p;
+  return r === 3 ? p.flip() : p;
+}
+// 큰 상자: 나란히 붙은 상자 두 개. vertical = 위아래로 붙은 것. 한 장으로 그린 뒤 칸마다 반씩 잘라 쓴다
+function chest2(vertical, r) {
+  const g = PAL.plank;
+  let p;
+  if (!vertical) {
+    p = new Pix(32, 18);
+    p.ellipse(16, 16.5, 15.5, 1.5, 0x000000, 55);
+    p.rect(1, 3, 30, 5, g.l); p.rect(1, 3, 30, 1, g.hi); p.rect(1, 7, 30, 1, g.d);   // 뚜껑
+    p.rect(1, 8, 30, 9, g.b); p.rect(1, 16, 30, 1, g.d);
+    for (let x = 5; x < 30; x += 5) p.rect(x, 9, 1, 7, g.d);
+    for (const x of [1, 29]) { p.rect(x, 3, 2, 14, IRON.b); p.rect(x, 3, 1, 14, IRON.l); }
+    p.rect(1, 8, 30, 1, IRON.d);
+    if (r === 0) { p.rect(14, 7, 4, 4, GOLD.b); p.rect(14, 7, 4, 1, GOLD.l); p.rect(15, 9, 2, 1, GOLD.d); p.rect(14, 10, 4, 1, GOLD.d); }   // 가운데 큰 걸쇠
+    else if (r === 2) for (const x of [6, 15, 24]) p.rect(x, 7, 2, 2, IRON.k);                                                          // 뒷면: 경첩
+    else { const x = r === 1 ? 1 : 30; p.rect(x, 7, 1, 4, GOLD.b); p.set(x, 7, GOLD.l); }                                               // 옆으로 보이는 걸쇠
+  } else {
+    p = new Pix(16, 34);
+    p.ellipse(8, 32.5, 7.5, 1.5, 0x000000, 55);
+    p.rect(1, 3, 14, 21, g.l); p.rect(1, 3, 14, 1, g.hi); p.rect(1, 23, 14, 1, g.d);   // 길어진 뚜껑
+    for (const x of [5, 10]) p.rect(x, 4, 1, 19, g.b);
+    p.rect(1, 24, 14, 9, g.b); p.rect(1, 32, 14, 1, g.d);
+    for (const x of [5, 10]) p.rect(x, 25, 1, 7, g.d);
+    for (const x of [1, 13]) { p.rect(x, 3, 2, 30, IRON.b); p.rect(x, 3, 1, 30, IRON.l); }
+    p.rect(1, 24, 14, 1, IRON.d);
+    if (r === 0) { p.rect(7, 23, 2, 4, GOLD.b); p.set(7, 23, GOLD.l); p.set(8, 26, GOLD.d); }
+    else if (r === 2) { p.rect(4, 23, 2, 2, IRON.k); p.rect(10, 23, 2, 2, IRON.k); }
+    else { const x = r === 1 ? 1 : 14; p.rect(x, 11, 1, 5, GOLD.b); p.set(x, 11, GOLD.l); }
+  }
+  return p.outline(K);
 }
 function torch(frame) {
   const p = new Pix(16, 20), b = PAL.bark;
@@ -571,9 +647,22 @@ function torch(frame) {
   p.outline(K);
   return p;
 }
-function door(open) {
+// 문. 0 · 2: 가로로 놓인 벽에 난 문(앞에서 본 모습), 1 · 3: 세로로 놓인 벽에 난 문(옆에서 본 모습)
+function door(open, r = 0) {
   const p = new Pix(16, 24), g = PAL.plank;
-  if (!open) {
+  if (r & 1) {
+    if (!open) {
+      p.rect(6, 2, 4, 21, g.b); p.rect(6, 2, 1, 21, g.l); p.rect(9, 2, 1, 21, g.d); p.rect(6, 2, 4, 1, g.hi);   // 옆에서 본 문짝
+      for (const y of [7, 17]) { p.rect(6, y, 4, 2, IRON.b); p.rect(6, y, 4, 1, IRON.l); }
+      p.rect(10, 12, 1, 2, GOLD.b);                                                                              // 손잡이
+      p.rect(6, 22, 4, 1, g.dd);
+    } else {
+      p.rect(6, 2, 3, 6, g.d); p.rect(6, 2, 1, 6, g.b);                                   // 북쪽 문틀
+      p.rect(9, 2, 6, 12, g.b); p.rect(9, 2, 6, 1, g.hi); p.rect(12, 3, 1, 11, g.d);      // 동쪽으로 젖힌 문짝
+      p.rect(9, 5, 6, 1, IRON.b); p.rect(9, 10, 6, 1, IRON.b); p.rect(9, 13, 6, 1, g.dd);
+      p.rect(6, 19, 3, 4, g.d); p.rect(6, 19, 1, 4, g.b);                                 // 남쪽 문틀
+    }
+  } else if (!open) {
     p.rect(1, 2, 14, 21, g.b);
     for (let x = 1; x < 15; x++) p.set(x, 2, g.hi);
     for (const x of [5, 10]) p.rect(x, 3, 1, 20, g.d);
@@ -586,36 +675,123 @@ function door(open) {
     p.rect(12, 2, 3, 21, g.d); p.rect(12, 2, 1, 21, g.b); p.rect(4, 2, 8, 1, g.d);
   }
   p.outline(K);
-  return p;
+  return r >= 2 ? p.flip() : p;       // 반 바퀴 돌리면 손잡이와 경첩이 반대쪽으로 간다
 }
-function bed() {
-  const p = new Pix(16, 30), g = PAL.plank;
-  p.ellipse(8, 28.5, 7.5, 1.5, 0x000000, 55);
-  p.rect(1, 2, 14, 4, g.d); p.rect(1, 2, 14, 1, g.l);                 // 머리판
-  p.rect(1, 6, 14, 20, 0xf2efe6);                                     // 매트리스
-  p.rect(3, 7, 10, 5, 0xffffff); p.rect(3, 11, 10, 1, 0xd8d4c8);       // 베개
-  p.rect(1, 13, 14, 13, 0xd9583b); p.rect(1, 13, 14, 2, 0xf07a5a);     // 이불
-  for (let y = 16; y < 26; y += 3) p.rect(1, y, 14, 1, 0xb04430);
-  p.rect(1, 26, 14, 3, g.b); p.rect(1, 26, 14, 1, g.l); p.rect(1, 28, 14, 1, g.dd);
-  p.outline(K);
-  return p;
-}
-// 양모 침대: 복슬복슬한 크림색 양털 이불과 하늘색 띠
-function woolBed() {
-  const p = new Pix(16, 30), g = PAL.plank, r = mulberry32(4411);
-  p.ellipse(8, 28.5, 7.5, 1.5, 0x000000, 55);
-  p.rect(1, 2, 14, 4, g.d); p.rect(1, 2, 14, 1, g.l);                 // 머리판
-  p.rect(1, 6, 14, 20, 0xf2efe6);                                     // 매트리스
-  p.rect(3, 7, 10, 5, 0xffffff); p.rect(3, 11, 10, 1, 0xd8d4c8);       // 베개
-  p.rect(1, 13, 14, 13, 0xf3ead2);                                    // 양털 이불
-  p.rect(1, 13, 14, 2, 0x7fb2de); p.rect(1, 13, 14, 1, 0xa9d0f0);      // 접힌 띠
-  for (let y = 16; y < 26; y += 2) for (let x = 1 + ((y >> 1) & 1); x < 15; x += 3) {   // 털 뭉치
-    p.set(x, y, 0xffffff); p.set(x + 1, y, 0xffffff); p.set(x + 1, y + 1, 0xd9cba6);
-    if (r() < 0.4) p.set(x, y + 1, 0xe6dabb);
+// 침대. wool: 양모 침대 (복슬복슬한 크림색 양털 이불과 하늘색 띠)
+// r 0: 머리가 북쪽(기본) · 2: 머리가 남쪽 · 1, 3: 가로로 누운 침대 (머리가 동쪽 / 서쪽)
+function bed(wool = false, r = 0) {
+  const g = PAL.plank, rnd = mulberry32(4411);
+  const col = wool ? 0xf3ead2 : 0xd9583b, fold = wool ? 0x7fb2de : 0xf07a5a, foldL = wool ? 0xa9d0f0 : 0xf07a5a, dark = 0xb04430;
+  const tuft = (p, x, y) => { p.set(x, y, 0xffffff); p.set(x + 1, y, 0xffffff); p.set(x + 1, y + 1, 0xd9cba6); if (rnd() < 0.4) p.set(x, y + 1, 0xe6dabb); };
+  if (r & 1) {
+    // 가로: 발치가 왼쪽, 머리판이 오른쪽 (서쪽을 볼 때는 뒤집는다). 앞쪽으로 침대 옆판이 보인다
+    const p = new Pix(30, 20);
+    p.ellipse(15, 18.5, 14.5, 1.5, 0x000000, 55);
+    p.rect(1, 2, 2, 13, g.b); p.rect(1, 2, 2, 1, g.l);                    // 발판
+    p.rect(3, 1, 23, 14, 0xf2efe6);                                       // 매트리스
+    p.rect(18, 3, 5, 10, 0xffffff); p.rect(18, 12, 5, 1, 0xd8d4c8);       // 베개
+    p.rect(3, 1, 13, 14, col);                                            // 이불
+    p.rect(14, 1, 2, 14, fold); p.rect(15, 1, 1, 14, foldL);              // 접힌 띠
+    if (wool) { for (let x = 4; x < 13; x += 2) for (let y = 2 + ((x >> 1) & 1); y < 14; y += 3) tuft(p, x, y); }
+    else for (const x of [5, 8, 11]) p.rect(x, 1, 1, 14, dark);
+    p.rect(1, 15, 28, 3, g.b); p.rect(1, 15, 28, 1, g.l); p.rect(1, 17, 28, 1, g.dd);   // 옆판
+    p.rect(3, 15, 13, 2, shade(col, 0.82));                                             // 옆으로 늘어진 이불
+    p.rect(26, 0, 3, 18, g.d); p.rect(26, 0, 3, 1, g.l); p.rect(26, 1, 1, 17, g.b);     // 머리판
+    p.outline(K);
+    return r === 3 ? p.flip() : p;
   }
-  p.rect(1, 26, 14, 3, g.b); p.rect(1, 26, 14, 1, g.l); p.rect(1, 28, 14, 1, g.dd);
+  const p = new Pix(16, 30);
+  p.ellipse(8, 28.5, 7.5, 1.5, 0x000000, 55);
+  if (r === 0) {
+    p.rect(1, 2, 14, 4, g.d); p.rect(1, 2, 14, 1, g.l);                 // 머리판
+    p.rect(1, 6, 14, 20, 0xf2efe6);                                     // 매트리스
+    p.rect(3, 7, 10, 5, 0xffffff); p.rect(3, 11, 10, 1, 0xd8d4c8);       // 베개
+    p.rect(1, 13, 14, 13, col); p.rect(1, 13, 14, 2, fold); p.rect(1, 13, 14, 1, foldL);   // 이불과 접힌 띠
+    if (wool) { for (let y = 16; y < 26; y += 2) for (let x = 1 + ((y >> 1) & 1); x < 15; x += 3) tuft(p, x, y); }
+    else for (let y = 16; y < 26; y += 3) p.rect(1, y, 14, 1, dark);
+    p.rect(1, 26, 14, 3, g.b); p.rect(1, 26, 14, 1, g.l); p.rect(1, 28, 14, 1, g.dd);   // 발판
+  } else {
+    // 머리가 남쪽: 발판이 위에, 베개와 머리판이 아래(화면 쪽)에 온다
+    p.rect(1, 2, 14, 2, g.b); p.rect(1, 2, 14, 1, g.l);                 // 발판
+    p.rect(1, 4, 14, 18, 0xf2efe6);                                     // 매트리스
+    p.rect(1, 4, 14, 12, col); p.rect(1, 14, 14, 2, fold); p.rect(1, 15, 14, 1, foldL);
+    if (wool) { for (let y = 5; y < 13; y += 2) for (let x = 1 + ((y >> 1) & 1); x < 15; x += 3) tuft(p, x, y); }
+    else for (let y = 6; y < 13; y += 3) p.rect(1, y, 14, 1, dark);
+    p.rect(3, 17, 10, 5, 0xffffff); p.rect(3, 21, 10, 1, 0xd8d4c8);      // 베개
+    p.rect(1, 22, 14, 7, g.d); p.rect(1, 22, 14, 1, g.l); p.rect(1, 28, 14, 1, g.dd);   // 머리판 (뒷면이 보인다)
+    for (const x of [5, 10]) p.rect(x, 23, 1, 5, g.dd);
+  }
   p.outline(K);
   return p;
+}
+// 표지판. written: 글이 적혀 있다
+function sign(r, written) {
+  const p = new Pix(16, 18), g = PAL.plank, b = PAL.bark, ink = 0x5a3d26;
+  if (r & 1) {
+    p.rect(7, 4, 2, 13, b.b); p.rect(7, 4, 1, 13, b.l);                      // 옆모습: 기둥과 판의 옆면
+    p.rect(5, 2, 2, 8, g.b); p.rect(5, 2, 1, 8, g.l); p.rect(5, 2, 2, 1, g.hi);
+  } else if (r === 2) {
+    p.rect(1, 2, 14, 8, g.b); p.rect(1, 2, 14, 1, g.l); p.rect(1, 9, 14, 1, g.dd);   // 뒷면: 기둥이 판 위로 지나간다
+    p.rect(1, 5, 14, 1, g.d);
+    p.rect(7, 2, 2, 15, b.b); p.rect(7, 2, 1, 15, b.l);
+  } else {
+    p.rect(7, 10, 2, 7, b.b); p.rect(7, 10, 1, 7, b.l);                      // 기둥
+    p.rect(1, 2, 14, 8, g.l); p.rect(1, 2, 14, 1, g.hi); p.rect(1, 9, 14, 1, g.d);   // 판
+    p.set(2, 3, g.d); p.set(13, 3, g.d);                                     // 못
+    if (written) { p.rect(3, 4, 5, 1, ink); p.rect(9, 4, 4, 1, ink); p.rect(3, 6, 7, 1, ink); p.rect(11, 6, 2, 1, ink); p.rect(4, 8, 6, 1, ink); }
+  }
+  p.outline(K);
+  const out = new Pix(16, 18);
+  out.ellipse(8, 16.6, 3.5, 1.2, 0x000000, 55);
+  out.blit(p);
+  return r === 3 ? out.flip() : out;
+}
+// 컨베이어 벨트 (남쪽으로 흐르는 그림. 다른 방향은 돌려서 쓴다). frame 0~3: 띠의 마디가 2px씩 흘러간다
+function belt(frame) {
+  const p = new Pix(16, 16), band = 0x2f3038, slat = 0x454853, arrow = 0xc9a227;
+  p.rect(0, 0, 16, 16, band);
+  for (let y = 0; y < 16; y++) if ((y - frame * 2 + 16) % 8 === 0) p.rect(2, y, 12, 1, slat);
+  for (let k = 0; k < 3; k++) { p.set(7 - k, 9 - k, arrow); p.set(8 + k, 9 - k, arrow); }      // 흐르는 방향
+  for (const x of [0, 14]) { p.rect(x, 0, 2, 16, IRON.d); p.rect(x, 0, 1, 16, IRON.b); }       // 양옆 난간
+  for (const y of [3, 11]) { p.set(0, y, IRON.l); p.set(15, y, IRON.k); }
+  return p;
+}
+// 압축기: 쇠로 된 몸통 위에 피스톤 기둥, 앞에는 누르는 틈과 아궁이. lit = 작동 중, frame = 누르는 동작
+function compressor(lit, frame = 0, r = 0) {
+  const p = new Pix(16, 22), m = { hi: 0xd6dce8, l: 0xa9b2c2, b: 0x8791a3, d: 0x646d80, k: 0x3e4352 };
+  const down = lit && frame ? 2 : 0;
+  p.ellipse(8, 20.5, 7.5, 1.5, 0x000000, 55);
+  p.rect(6, 1 + down, 4, 6, m.hi); p.rect(9, 1 + down, 1, 6, m.b);                 // 피스톤 막대
+  p.rect(4, 4, 8, 4, m.d); p.rect(4, 4, 8, 1, m.b); p.rect(4, 4, 1, 4, m.b);       // 피스톤 통
+  p.rect(1, 7, 14, 4, m.l); p.rect(1, 7, 14, 1, m.hi);                             // 윗면
+  p.rect(1, 11, 14, 9, m.b); p.rect(1, 19, 14, 1, m.d);                            // 앞면
+  for (const [x, y] of [[2, 12], [13, 12], [2, 18], [13, 18]]) p.set(x, y, m.hi);  // 리벳
+  if (r === 0) {
+    p.rect(3, 12, 10, 4, m.k);                                                     // 누르는 틈
+    p.rect(4, 12 + down, 8, 1, m.l);                                               // 내려오는 누름판
+    p.rect(5, 15, 6, 1, lit ? 0xffd9a0 : m.d);                                     // 눌리는 판
+    p.rect(5, 17, 6, 2, m.k);                                                      // 아궁이
+    if (lit) { p.rect(6, 17, 4, 2, 0xff8a2a); p.set(7 + frame, 17, 0xffd95a); }
+  } else if (r === 2) {
+    p.rect(3, 12, 2, 8, m.d); p.rect(3, 12, 1, 8, m.l);                            // 뒷면: 굴뚝 관과 바람구멍
+    for (const y of [13, 15, 17]) p.rect(7, y, 6, 1, m.k);
+    if (lit) p.rect(8, 17, 3, 1, 0xff8a2a);
+  } else {
+    p.disc(9, 15, 3.4, m.d); p.disc(9, 15, 2.2, m.l); p.set(9, 15, m.k);            // 옆모습: 힘을 전하는 톱니바퀴
+    for (const [x, y] of [[9, 11], [9, 19], [5, 15], [13, 15]]) p.set(x, y, m.d);
+    if (lit && frame) { p.set(7, 13, m.hi); p.set(11, 17, m.hi); } else { p.set(11, 13, m.hi); p.set(7, 17, m.hi); }
+    p.rect(1, 12, 2, 7, m.k);                                                      // 누르는 틈은 왼쪽 모서리에 살짝
+    if (lit) { p.rect(1, 16, 1, 2, 0xff8a2a); p.set(1, 16 + frame, 0xffd95a); }
+  }
+  p.outline(K);
+  return r === 3 ? p.flip() : p;
+}
+// 블록에 붙인 나무 판
+function plaque(written) {
+  const p = new Pix(12, 7), g = PAL.plank, ink = 0x5a3d26;
+  p.rect(1, 1, 10, 5, g.l); p.rect(1, 1, 10, 1, g.hi); p.rect(1, 5, 10, 1, g.d);
+  if (written) { p.rect(2, 2, 4, 1, ink); p.rect(7, 2, 3, 1, ink); p.rect(2, 4, 6, 1, ink); }
+  return p.outline(K);
 }
 // 울타리. mask: 1 북 · 2 동 · 4 남 · 8 서 쪽 이웃과 이어짐
 function fence(mask) {
@@ -855,8 +1031,11 @@ export function buildSprites() {
   wall('w_gold', 3, (v) => addOre(texRock(2601 + v, rockPal), 61 + v, { l: 0xfff1a0, b: 0xf2c53d, d: 0xc08f1a }));
   wall('w_bedrock', 2, (v) => texRock(2701 + v, { hi: 0x4a4652, l: 0x413d49, b: 0x35323c, d: 0x26232c, dd: 0x1a1820 }));
   wall('w_dark', 2, (v) => { const p = new Pix(16, 16).fill(0x15121b); const r = mulberry32(2801 + v); for (let i = 0; i < 9; i++) p.set(ri(r, 16), ri(r, 16), 0x1c1924); return p; });
-  A('w_wood_0', wallFrom(texWoodWall()), 0, -6);
-  A('w_brick_0', wallFrom(texBrick(2901)), 0, -6);
+  // 나무 벽 · 돌 벽돌은 R로 돌리면 결의 방향이 돈다
+  for (let r = 0; r < 4; r++) {
+    A(r ? `w_wood_0_r${r}` : 'w_wood_0', wallFrom(rotN(texWoodWall(), r)), 0, -6);
+    A(r ? `w_brick_0_r${r}` : 'w_brick_0', wallFrom(rotN(texBrick(2901), r)), 0, -6);
+  }
 
   // 벽 테두리 & 그림자
   { const p = new Pix(16, 22); p.rect(0, 0, 16, 1, 0x000000, 150); p.rect(0, 1, 16, 1, 0xffffff, 55); A('rim_N', p, 0, -6); }
@@ -895,15 +1074,29 @@ export function buildSprites() {
   anchored('o_ladder_0', ladder());
 
   // 설치물
-  anchored('o_workbench_0', workbench());
-  anchored('o_furnace_0', furnace(false));
-  anchored('o_furnace_1', furnace(true, 0));
-  anchored('o_furnace_1b', furnace(true, 1));
-  anchored('o_chest_0', chest());
+  // 방향이 있는 설치물: 남쪽을 보는 기본 그림은 이름 그대로, 나머지는 뒤에 _r1(서) · _r2(북) · _r3(동)
+  const rots = (n, fn) => { for (let r = 0; r < 4; r++) anchored(r ? `${n}_r${r}` : n, fn(r)); };
+  rots('o_workbench_0', (r) => workbench(r));
+  rots('o_furnace_0', (r) => furnace(false, 0, r));
+  rots('o_furnace_1', (r) => furnace(true, 0, r));
+  rots('o_furnace_1b', (r) => furnace(true, 1, r));
+  rots('o_chest_0', (r) => chest(r));
+  for (const [v, n] of [[0, 'h'], [1, 'v']]) for (let r = 0; r < 4; r++) {      // 큰 상자: 가로 · 세로로 붙은 두 칸을 반씩
+    const p = chest2(!!v, r);
+    anchored(`o_chest2_${n}_r${r}_0`, sub(p, 0, 0, 16, 18));
+    anchored(`o_chest2_${n}_r${r}_1`, v ? sub(p, 0, 18, 16, 16) : sub(p, 16, 0, 16, 18));
+  }
   for (let f = 0; f < 3; f++) anchored(`o_torch_0_${f}`, torch(f));
-  anchored('o_door_0', door(false)); anchored('o_door_1', door(true));
-  anchored('o_bed_0', bed());
-  anchored('o_woolbed_0', woolBed());
+  rots('o_door_0', (r) => door(false, r)); rots('o_door_1', (r) => door(true, r));
+  rots('o_bed_0', (r) => bed(false, r));
+  rots('o_woolbed_0', (r) => bed(true, r));
+  rots('o_sign_0', (r) => sign(r, false)); rots('o_sign_1', (r) => sign(r, true));
+  A('plq_0', plaque(false)); A('plq_1', plaque(true));
+  // 공장
+  for (let r = 0; r < 4; r++) for (let f = 0; f < 4; f++) A(`o_belt_r${r}_${f}`, rotN(belt(f), r));
+  rots('o_compressor_0', (r) => compressor(false, 0, r));
+  rots('o_compressor_1', (r) => compressor(true, 0, r));
+  rots('o_compressor_1b', (r) => compressor(true, 1, r));
   for (let m = 0; m < 16; m++) anchored(`o_fence_${m}`, fence(m));       // 이웃과 이어지는 16가지 모양
   for (const [v, n] of [[0, 'h'], [1, 'v']]) for (let o = 0; o < 2; o++) anchored(`o_gate_${n}_${o}`, fenceGate(!!v, !!o));
   // 동물: 오른쪽·왼쪽, 서기·걷기 2프레임, 맞았을 때의 붉은 그림(…h)

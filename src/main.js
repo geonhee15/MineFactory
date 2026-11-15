@@ -6,7 +6,7 @@ import { Input } from './input.js';
 import { AudioSys } from './audio.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
-import { loadSave, shelve, backup, writeSave, serialize } from './save.js';
+import { listWorlds, createWorld, setWorld, loadWorld, backup, writeSave } from './save.js';
 
 const canvas = document.getElementById('game');
 const atlas = buildSprites();
@@ -35,7 +35,7 @@ function parseSeed(str) {
   return h >>> 0;
 }
 
-let save = null;
+let worlds = [];           // 저장된 세계 목록 (최근에 플레이한 것이 앞)
 let freshWorld = false;   // 타이틀 배경으로 만든, 아직 플레이하지 않은 세계인가
 let titleAngle = Math.random() * 6.28;
 
@@ -50,62 +50,84 @@ function startPlay() {
   ui.hideTitle();
   game.updateSeen();
 }
-// 타이틀 화면으로: 배경용 세계를 새로 만들고 저장 상태를 다시 읽는다
+// 타이틀 화면으로: 배경용 세계를 새로 만들고 세계 목록을 다시 읽는다
 async function toTitle(keepWorld) {
   ui.togglePause(false);
   game.state = 'title';
   if (!keepWorld) { game.newWorld(randomSeed()); freshWorld = true; }
   game.layer = 0;           // 타이틀 배경은 항상 지상
-  save = await loadSave();
+  worlds = await listWorlds();
   audio.setScene('title');
-  ui.showTitle(!!save);
+  ui.showTitle(worlds);
 }
+// 멀티플레이 중이면 먼저 방에서 나온다
+const leaveRoom = () => { if (game.state === 'play' && game.net.on) { if (game.net.isGuest) game.net.leave(); else game.net.closeRoom(); } };
 
-ui.on.new = (seedStr) => {
-  const go = async () => {
-    // 이전 세계는 지우지 않고 백업으로 옮겨 둔다 (세이브 관리에서 되돌릴 수 있다)
-    if (save) { try { await shelve('new'); } catch (e) { console.warn(e); } save = null; }
+// 새 세계: 이름을 붙여 목록에 올리고 시작한다. 다른 세계는 그대로 남는다
+ui.on.new = async (name, seedStr) => {
+  ui.loading(true);
+  await new Promise((r) => setTimeout(r, 30));
+  try {
     // 시드를 지정하지 않았다면 타이틀 화면에 보이던 바로 그 세계에서 시작한다
-    if (seedStr || !freshWorld) {
-      ui.loading(true);
-      await new Promise((r) => setTimeout(r, 30));
-      game.newWorld(parseSeed(seedStr));
-      ui.loading(false);
-    }
+    if (seedStr || !freshWorld) game.newWorld(parseSeed(seedStr));
+    const w = await createWorld(name, game.world.seed);
+    setWorld(w.key); game.worldName = w.name;
     startPlay();
-    ui.banner('마인 팩토리');
+    ui.banner(w.name);
     ui.toast('나무에 마우스를 대고 길게 눌러 보세요', 'good');
-    game.save();
-  };
-  if (save) ui.confirm('저장된 세계가 있어요. 새로 시작할까요?<br>이전 세계는 백업으로 옮겨 두니, <b>세이브 관리</b>에서 되돌릴 수 있어요.', go);
-  else go();
+    await game.save();
+  } catch (e) { console.warn(e); ui.toast('세계를 만들지 못했어요'); }
+  ui.loading(false);
 };
-ui.on.continue = () => {
-  if (!save) return;
-  game.loadFrom(save);
+// 저장된 세계를 골라 플레이
+ui.on.play = async (key) => {
+  const w = (await listWorlds()).find((x) => x.key === key), d = await loadWorld(key);
+  if (!w || !d) { ui.toast('이 세계를 불러오지 못했어요'); return; }
+  setWorld(key);
+  game.loadFrom(d); game.worldName = w.name;
   startPlay();
-  ui.banner(`${game.day}일차`);
+  ui.banner(`${w.name} · ${game.day}일차`);
 };
+ui.on.continue = () => { if (worlds.length) ui.on.play(worlds[0].key); };
+ui.on.worldsChanged = async () => { worlds = await listWorlds(); if (game.state === 'title') ui.showTitle(worlds); };
 ui.on.title = async () => {
   if (game.net.isGuest) { await game.save(); game.net.leave(); return toTitle(false); }
   if (game.net.on) game.net.closeRoom();
   await game.save();
-  save = serialize(game);
   return toTitle(true);
 };
-// 백업이나 세이브 파일로 되돌리기. 지금 세이브는 먼저 백업으로 옮긴다
-ui.on.restore = async (data, reason) => {
+// 백업으로 되돌리기: 그 세계의 지금 세이브는 먼저 백업으로 옮긴다
+ui.on.restore = async (key, data) => {
   try {
-    if (game.state === 'play' && game.net.on) { if (game.net.isGuest) game.net.leave(); else game.net.closeRoom(); }
-    const cur = await loadSave();
-    if (cur) await backup(cur, reason);
-    await writeSave(data);
-    save = data;
-    game.loadFrom(data);
+    leaveRoom();
+    const w = (await listWorlds()).find((x) => x.key === key);
+    if (!w) throw new Error('world');
+    const cur = await loadWorld(key);
+    if (cur) await backup(cur, 'restore', key);
+    data.name = w.name;
+    await writeSave(data, key);
+    setWorld(key);
+    game.loadFrom(data); game.worldName = w.name;
     ui.togglePause(false);
     startPlay();
-    ui.banner(`${game.day}일차`);
-    ui.toast('세계를 불러왔어요', 'good');
+    ui.banner(`${w.name} · ${game.day}일차`);
+    ui.toast('백업으로 되돌렸어요', 'good');
+  } catch (e) { console.warn(e); ui.toast('되돌리지 못했어요'); }
+};
+// 세이브 파일 불러오기: 새 세계로 목록에 더한다 (다른 세계를 덮어쓰지 않는다)
+ui.on.import = async (data) => {
+  try {
+    if (game.state === 'play') await game.save();
+    leaveRoom();
+    const w = await createWorld(data.name || '불러온 세계', data.seed);
+    data.name = w.name;
+    await writeSave(data, w.key);
+    setWorld(w.key);
+    game.loadFrom(data); game.worldName = w.name;
+    ui.togglePause(false);
+    startPlay();
+    ui.banner(`${w.name} · ${game.day}일차`);
+    ui.toast('세이브 파일을 새 세계로 불러왔어요', 'good');
   } catch (e) { console.warn(e); ui.toast('불러오지 못했어요'); }
 };
 // 친구 방에 참가
@@ -150,11 +172,11 @@ function frame(now) {
 }
 
 (async function boot() {
-  save = await loadSave();
+  worlds = await listWorlds();
   game.newWorld(randomSeed());
   freshWorld = true;
   game.state = 'title';
-  ui.showTitle(!!save);
+  ui.showTitle(worlds);
   // 초대 링크(?join=코드)로 들어왔으면 참가 창을 바로 띄운다
   const code = new URLSearchParams(location.search).get('join');
   if (code) { ui.showPanel('join'); ui.$('j-code').value = code.toUpperCase().slice(0, 6); }

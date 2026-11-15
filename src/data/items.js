@@ -22,15 +22,23 @@ item('iron_ingot', '철 주괴', '튼튼한 도구와 기계의 재료.');
 item('copper_ingot', '구리 주괴', '전기가 잘 통하는 금속.');
 item('gold_ingot', '금 주괴', '반짝이는 귀금속.');
 item('crystal', '수정', '은은하게 빛나는 결정. 언젠가 쓸모가 있을 것 같다.');
-item('gear', '톱니바퀴', '기계의 기본 부품. 공장 시대의 첫걸음!');
-item('copper_wire', '구리선', '전기를 나르는 선. 공장 설비에 쓰인다.');
+item('gear', '톱니바퀴', '기계의 기본 부품. 컨베이어 벨트와 압축기에 들어간다.');
+item('copper_wire', '구리선', '전기를 나르는 선. 압축기 같은 공장 설비에 쓰인다.');
+item('machine_frame', '기계 틀', '철로 짠 튼튼한 뼈대. 공장 기계를 만들 때 바탕이 된다.');
+item('piston', '피스톤', '힘껏 밀어 누르는 부품. 압축기의 심장.');
+// 압축기로 눌러 만든 판 (쓸 곳은 앞으로 늘어난다)
+item('granite_plate', '화강암 판', '화강암을 눌러 만든 단단한 판.');
+item('andesite_plate', '안산암 판', '안산암을 눌러 만든 매끈한 판.');
+item('iron_plate', '철판', '철 주괴를 눌러 편 판. 튼튼한 설비의 재료.');
+item('gold_plate', '금 판', '금 주괴를 눌러 편 판. 얇고 반짝인다.');
+item('copper_plate', '구리 판', '구리 주괴를 눌러 편 판. 열과 전기가 잘 통한다.');
 
 // ── 동물에게서 얻는 것 ── (지금은 양털만 쓸 곳이 있다. 고기는 아직 먹을 수 없다)
 item('beef', '소고기', '소에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
 item('pork', '돼지고기', '돼지에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
 item('mutton', '양고기', '양에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
 item('chicken', '닭고기', '닭에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
-item('leather', '가죽', '질기고 튼튼한 소가죽. 언젠가 쓸모가 있을 것 같다.');
+item('leather', '가죽', '질기고 튼튼한 소가죽. 컨베이어 벨트의 띠로 쓰면 풀섬유보다 훨씬 많이 만들 수 있다.');
 item('wool', '양털', '폭신한 양털. 양모 침대의 재료.');
 item('feather', '깃털', '가벼운 닭 깃털. 언젠가 쓸모가 있을 것 같다.');
 item('egg', '달걀', '닭에게서 얻은 달걀. 언젠가 쓸모가 있을 것 같다.');
@@ -61,16 +69,19 @@ item('glowshroom', '빛버섯', '어둠 속에서 빛나는 버섯. 바닥에 �
 // ── 설치물 ──
 item('workbench', '제작대', '설치하고 우클릭하면 더 많은 것을 만들 수 있다.', { place: { obj: O.WORKBENCH } });
 item('furnace', '화로', '광석을 녹이고 음식을 굽는다. 연료가 필요하다.', { place: { obj: O.FURNACE } });
-item('chest', '상자', '아이템 27칸을 보관한다.', { place: { obj: O.CHEST } });
+item('chest', '상자', '아이템 27칸을 보관한다. 두 개를 나란히 놓으면 54칸짜리 큰 상자가 된다.', { place: { obj: O.CHEST } });
 item('torch', '횃불', '어둠을 밝힌다. 손에 들고만 있어도 밝다.', { place: { obj: O.TORCH }, light: 8 });
 item('wood_wall', '나무 벽', '집을 지을 때 쓰는 벽.', { place: { obj: O.WOOD_WALL } });
 item('stone_brick', '돌 벽돌', '단단한 건축용 벽.', { place: { obj: O.STONE_BRICK } });
 item('plank_floor', '나무 바닥', '바닥에 깐다.', { place: { ground: G.PLANK } });
 item('door', '문', '우클릭으로 여닫는다.', { place: { obj: O.DOOR } });
-item('bed', '침대', '밤에 우클릭하면 아침까지 잔다.', { place: { obj: O.BED } });
-item('wool_bed', '양모 침대', '자고 일어나면 포만감이 가득 찬다. 낮에 우클릭하면 저녁까지 낮잠을 잔다.', { place: { obj: O.WOOL_BED } });
+item('bed', '침대', '밤에 우클릭하면 아침까지 잔다. 우클릭한 침대는 쓰러졌을 때 다시 일어나는 리스폰 지점이 된다.', { place: { obj: O.BED } });
+item('wool_bed', '양모 침대', '자고 일어나면 포만감이 가득 찬다. 낮에 우클릭하면 저녁까지 낮잠을 잔다. 우클릭하면 리스폰 지점이 된다.', { place: { obj: O.WOOL_BED } });
 item('fence', '울타리', '사람도 동물도 넘지 못하는 낮은 담. 나란히 놓으면 서로 이어진다.', { place: { obj: O.FENCE } });
 item('fence_gate', '울타리 문', '우클릭으로 여닫는다. 동물은 열지 못한다.', { place: { obj: O.GATE } });
+item('sign', '표지판', '땅에 세우고 글을 쓴다. 블록에 대고 놓으면 그 블록에 나무 판으로 붙는다.', { place: { obj: O.SIGN }, sign: true });
+item('belt', '컨베이어 벨트', '놓인 방향으로 그 위의 아이템을 실어 나른다. 앞에 붙은 상자 · 기계에는 물건을 넣고, 뒤에 붙은 상자 · 기계에서는 물건을 꺼낸다.', { place: { obj: O.BELT } });
+item('compressor', '압축기', '연료를 태워 재료 3개를 판 하나로 눌러 만든다. 화강암 · 안산암 · 철 · 금 · 구리.', { place: { obj: O.COMPRESSOR } });
 item('roof', '지붕', '벽과 방 위를 덮는 천장. 밖에서는 안이 보이지 않고, 문을 열거나 안에 들어가면 비쳐 보인다.', { roof: true });
 item('flag', '깃발', '세우고 색을 고르면 지도에 깃발로 표시된다. 멀리서도 화살표로 방향을 알려 준다.', { place: { obj: O.FLAG } });
 
@@ -130,12 +141,21 @@ R('bed', 1, { plank: 6, fiber: 8 }, 'workbench', 'build');
 R('wool_bed', 1, { plank: 6, wool: 3 }, 'workbench', 'build');
 R('fence', 4, { plank: 2, stick: 4 }, 'workbench', 'build');
 R('fence_gate', 1, { plank: 2, stick: 2 }, 'workbench', 'build');
+R('sign', 2, { plank: 3, stick: 1 }, 'workbench', 'build');
 
 R('bread', 1, { wheat: 3 }, 'workbench', 'food');
 R('gear', 1, { iron_ingot: 2 }, 'workbench', 'part');
 R('copper_wire', 2, { copper_ingot: 1 }, 'workbench', 'part');
+R('machine_frame', 1, { iron_ingot: 4, stone_brick: 2 }, 'workbench', 'part');
+R('piston', 1, { iron_ingot: 2, stick: 2 }, 'workbench', 'part');
 
-export const CATEGORY_NAMES = { basic: '기본', tool: '도구', build: '건축', food: '음식', part: '부품' };
+// 공장: 벨트의 띠는 풀섬유를 엮거나(4개) 가죽으로(8개) 만든다
+R('belt', 4, { iron_ingot: 1, gear: 1, fiber: 6 }, 'workbench', 'factory');
+R('belt', 8, { iron_ingot: 1, gear: 1, leather: 2 }, 'workbench', 'factory');
+// 압축기 = 뼈대 + 누르는 피스톤 + 힘을 전하는 톱니바퀴 + 불을 때는 화로 + 구리선
+R('compressor', 1, { machine_frame: 1, piston: 1, gear: 2, copper_wire: 4, furnace: 1 }, 'workbench', 'factory');
+
+export const CATEGORY_NAMES = { basic: '기본', tool: '도구', build: '건축', food: '음식', part: '부품', factory: '공장' };
 
 // ── 화로 ──
 export const SMELT = {
@@ -145,5 +165,16 @@ export const SMELT = {
   log: { out: 'charcoal', time: 5 },
   mushroom: { out: 'baked_mushroom', time: 4 },
 };
+
+// ── 압축기 ── (재료 n개를 눌러 판 하나로. 화로처럼 연료가 필요하다)
+export const PRESS = {
+  granite: { out: 'granite_plate', n: 3, time: 6 },
+  andesite: { out: 'andesite_plate', n: 3, time: 6 },
+  iron_ingot: { out: 'iron_plate', n: 3, time: 8 },
+  gold_ingot: { out: 'gold_plate', n: 3, time: 8 },
+  copper_ingot: { out: 'copper_plate', n: 3, time: 8 },
+};
+// 연료를 태워 재료를 바꾸는 기계: 종류 → 조합법 (칸은 [재료, 연료, 결과])
+export const MACHINE = { furnace: SMELT, compressor: PRESS };
 
 export const itemName = (id) => (ITEMS[id] ? ITEMS[id].name : id);

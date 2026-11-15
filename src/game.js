@@ -1,11 +1,11 @@
-// 게임 상태와 규칙: 이동, 채굴, 설치, 농사, 화로, 동굴 이동
+// 게임 상태와 규칙: 이동, 채굴, 설치(돌리기 · 표지판 · 큰 상자), 농사, 사냥, 화로, 동굴 이동, 포만감과 쓰러짐
 import { TILE, MAP_W, MAP_H, SURFACE, CAVE, DAY_LENGTH, REACH, INV_SIZE, HOTBAR, WALL_LIFT, ROOF_LIFT } from './config.js';
 import { G, GROUND } from './data/ground.js';
-import { O, OBJ, SAPLING_TREES } from './data/objects.js';
-import { ITEMS, TOOL_SPEED, SHOVEL_COOL, SMELT, attackDamage } from './data/items.js';
+import { O, OBJ, SAPLING_TREES, canPlaque, cleanSign, CHEST_DIR, entType, ROT_DIR } from './data/objects.js';
+import { ITEMS, TOOL_SPEED, SHOVEL_COOL, MACHINE, attackDamage } from './data/items.js';
 import { MOBS } from './data/mobs.js';
 import { World } from './world/world.js';
-import { generate } from './world/gen.js';
+import { generate, enrichOres } from './world/gen.js';
 import { Inventory, maxStack } from './inventory.js';
 import { checkQuests } from './quests.js';
 import { saveGame, restoreWorld, saveProfile, newId } from './save.js';
@@ -17,12 +17,22 @@ const randi = (a, b) => Math.floor(rand(a, b + 1));
 const DIRS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
 const ATTACK_REACH = 2.5 * TILE;   // 동물을 때릴 수 있는 거리
 const EVENING = DAY_LENGTH * (13 / 24);   // 저녁 7시 (하루는 아침 6시에 시작한다)
+const GROGGY_TIME = 120;           // 포만감이 바닥난 뒤 쓰러지기까지 버티는 시간(초)
+const CRAWL_SPEED = 20;            // 그로기 상태에서 기어가는 속도 (평소 72)
+const RESPAWN_HUNGER = 50;         // 다시 일어났을 때의 포만감
+const BELT_SPEED = 30;             // 컨베이어 벨트가 물건을 나르는 속도(px/초). 걷는 속도의 절반이 조금 안 된다
+const BELT_PULL = 1;               // 벨트가 뒤쪽 상자 · 기계에서 물건을 하나 꺼내는 간격(초)
+const clampN = (v, a, b) => (v < a ? a : v > b ? b : v);
 const USE_TEXT = {
   workbench: '제작대 사용', furnace: '화로 열기', chest: '상자 열기', cave: '동굴로 들어가기',
   ladder: '지상으로 올라가기', door: '문 여닫기', bed: '잠자기', flag: '깃발 색 바꾸기', gate: '울타리 문 여닫기',
+  sign: '표지판에 글 쓰기', compressor: '압축기 열기',
 };
+const SIGN_EDIT = '표지판 고쳐 쓰기';
 // 지붕은 타일 오브젝트가 아니라 별도 층이라, 캘 때 쓰는 정의를 따로 둔다
 const ROOF_DEF = { name: '지붕', canBreak: true, wall: false, tool: 'axe', tier: 0, hard: 0.7, mat: 'wood', pcol: [0xa8503a, 0xc4664a, 0x86392c] };
+// 블록에 붙인 나무 판(표지판)도 타일 오브젝트가 아니라 그 블록에 딸린 것이다
+const PLAQUE_DEF = { name: '표지판', canBreak: true, wall: false, tool: 'axe', tier: 0, hard: 0.4, mat: 'wood', pcol: [0x7a5536, 0x96693f, 0xc49a5c] };
 
 export class Game {
   constructor({ audio, input, ui }) {
@@ -31,6 +41,7 @@ export class Game {
     this.state = 'title';       // 'title' | 'play'
     this.paused = false;
     this.world = null;
+    this.worldName = '';              // 지금 플레이하는 세계의 이름 (main.js가 채운다)
     this.onDisconnected = () => {};   // 방장과 연결이 끊겼을 때 (main.js가 채운다)
     this.mobs = new Mobs(this);
     this.reset();
@@ -40,7 +51,9 @@ export class Game {
   reset() {
     this.layer = SURFACE;
     this.time = DAY_LENGTH * (2 / 24);   // 아침 8시에 시작
-    this.player = { x: 0, y: 0, dir: 'd', moving: false, anim: 0, hunger: 100, swing: 0, stepT: 0 };
+    // groggy: 쓰러지기까지 남은 시간(초, 0이면 멀쩡함) · bed: 리스폰 지점으로 정한 침대 { l, x, y }
+    this.player = { x: 0, y: 0, dir: 'd', moving: false, anim: 0, hunger: 100, swing: 0, stepT: 0, groggy: 0, bed: null };
+    this.dying = false;
     this.inv = new Inventory(INV_SIZE);
     this.inv.onChange = () => { this.ui.dirty = true; };
     this.hotbar = 0;
@@ -60,11 +73,13 @@ export class Game {
     this.frameNo = 0;
     this.cool = 0;
     this.lastAct = -1;
+    this.placeRot = 0;          // 방향이 있는 설치물을 놓을 방향 (들고서 R)
+    this.holdOff = false;       // 누르고 있던 버튼을 뗄 때까지 캐지 않는다 (나무 판을 뗀 직후 블록까지 캐지 않게)
     this.fade = null;           // { t, dur, phase, cb }
     this.fadeAlpha = 0;
     this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {} };
     this.quest = 0;
-    this.simAcc = 0; this.seenAcc = 1; this.saveAcc = 0;
+    this.simAcc = 0; this.seenAcc = 1; this.saveAcc = 0; this.beltAcc = 0;
     this.scene = '';
     this.prompt = null;
   }
@@ -87,6 +102,9 @@ export class Game {
     this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {}, ...d.stats };
     this.drops = (d.drops || []).filter((x) => ITEMS[x.id]).map((x) => ({ vx: 0, vy: 0, z: 0, vz: 0, t: 1, age: 0, ...x, uid: this.dropSeq++ }));
     if (Array.isArray(d.mobs)) this.mobs.load(d.mobs); else this.mobs.populate();   // 동물이 생기기 전의 세이브에는 새로 뿌려 준다
+    this.pairAllChests();       // 큰 상자가 생기기 전의 세이브: 나란히 놓여 있던 상자들을 묶어 준다
+    this.world.oreV = d.oreV || 1;
+    enrichOres(this.world);     // 광석이 적던 때의 세이브: 아직 가 보지 않은 동굴 벽 속에 광맥을 더 넣는다
     this.hook();
   }
   // 손님: 방장에게서 받은 세계에 들어간다. 가방·진행도는 내 브라우저에 저장해 둔 것을 쓴다
@@ -110,7 +128,7 @@ export class Game {
     const p = this.player;
     return {
       savedAt: Date.now(), layer: this.layer, hotbar: this.hotbar, quest: this.quest,
-      player: { x: p.x, y: p.y, dir: p.dir, hunger: p.hunger }, inv: this.inv.slots, stats: this.stats,
+      player: { x: p.x, y: p.y, dir: p.dir, hunger: p.hunger, groggy: p.groggy, bed: p.bed }, inv: this.inv.slots, stats: this.stats,
       seen: this.world.layers.map((L) => L.seen),
     };
   }
@@ -159,8 +177,7 @@ export class Game {
     this.seenAcc += dt;
     if (this.seenAcc >= 0.25) { this.seenAcc = 0; this.updateSeen(); }
     if (this.shake && (this.shake.t -= dt) <= 0) this.shake = null;
-    const p = this.player;
-    p.hunger = Math.max(0, p.hunger - dt * 0.085);
+    this.updateHunger(dt);
     const scene = this.layer === CAVE ? 'cave' : this.night ? 'night' : 'day';
     if (scene !== this.scene) { this.scene = scene; this.audio.setScene(scene); }
     this.saveAcc += dt;
@@ -175,7 +192,9 @@ export class Game {
       this.simAcc += dt;
       while (this.simAcc >= 1) { this.simAcc -= 1; this.tickGrowth(1); }
       this.tickFurnaces(dt);
-    } else if (this.net.owned && this.net.owned.ent.type === 'furnace') {
+      this.beltAcc += dt;
+      if (this.beltAcc >= BELT_PULL) { this.beltAcc = 0; this.beltPull(); }
+    } else if (this.net.owned && MACHINE[this.net.owned.ent.type]) {
       const o = this.net.owned;                    // 손님이 열어 둔 화로는 그 손님이 돌린다
       this.tickFurnace(o.l, o.i, o.ent, dt);
     }
@@ -204,7 +223,8 @@ export class Game {
     if (p.moving) {
       // 다진 길 위에서는 조금 더 빨리 걷는다
       const fast = GROUND[this.world.ground(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))].speed || 1;
-      const len = Math.hypot(mx, my), sp = (p.hunger <= 0 ? 46 : 72) * fast * dt;
+      const crawl = p.hunger <= 0;                                // 그로기: 기어가듯 느리다
+      const len = Math.hypot(mx, my), sp = (crawl ? CRAWL_SPEED : 72) * fast * dt;
       const dx = (mx / len) * sp, dy = (my / len) * sp;
       if (this.collides(p.x, p.y)) { p.x += dx; p.y += dy; }   // 끼었을 때는 빠져나올 수 있게
       else {
@@ -214,8 +234,8 @@ export class Game {
       }
       p.x = Math.max(6, Math.min(MAP_W * TILE - 6, p.x)); p.y = Math.max(8, Math.min(MAP_H * TILE - 4, p.y));
       if (!(this.mining || p.swing > 0)) p.dir = Math.abs(mx) >= Math.abs(my) && mx ? (mx > 0 ? 'r' : 'l') : my > 0 ? 'd' : 'u';
-      p.anim += dt * 8 * fast;
-      p.stepT -= dt * fast;
+      p.anim += dt * (crawl ? 3 : 8) * fast;
+      p.stepT -= dt * fast * (crawl ? 0.4 : 1);
       if (p.stepT <= 0) {
         p.stepT = 0.3;
         const g = GROUND[this.world.ground(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))];
@@ -339,19 +359,24 @@ export class Game {
       if (rt && (this.roofEdit || this.roofBlocks(rt.x, rt.y))) this.cursor = { x: rt.x, y: rt.y, inReach: rt.inReach, roof: true };
       else this.cursor = usesEmpty && d.inReach && this.world.obj(this.layer, d.x, d.y) === O.NONE ? d : this.target;
     }
+    if (!blocked && inp.hit('KeyR')) this.rotate();
     // 상호작용 안내
     this.prompt = null;
     const cand = this.target.inReach ? this.target : this.facingTarget();
     if (cand.inReach || this.reach(cand.x, cand.y)) {
-      const o = this.world.obj(this.layer, cand.x, cand.y), def = OBJ[o], mt = this.world.meta(this.layer, cand.x, cand.y);
+      const w = this.world, L = this.layer, ci = w.idx(cand.x, cand.y);
+      const o = w.obj(L, cand.x, cand.y), def = OBJ[o], mt = w.meta(L, cand.x, cand.y);
       if (def.use === 'harvest') { if (mt) this.prompt = `${def.harvest.item === 'apple' ? '사과' : '열매'} 따기`; }
-      else if (def.use) this.prompt = def.nap && this.napTime ? '낮잠 자기' : USE_TEXT[def.use];
+      else if (def.use === 'sign') this.prompt = w.signs[L].get(ci) ? SIGN_EDIT : USE_TEXT.sign;
+      else if (def.use) this.prompt = def.nap && this.napTime ? '낮잠 자기' : o === O.CHEST && mt ? '큰 상자 열기' : USE_TEXT[def.use];
       else if (def.crop && mt >= 3) this.prompt = '수확하기';
+      // 나무 판이 붙은 블록: 쓸 수 있는 블록이면 Shift를 누른 채로, 아니면 그냥 우클릭으로 글을 고친다
+      if (w.plaque(L, ci)) this.prompt = this.prompt ? `${this.prompt} &nbsp;<b>Shift+우클릭</b>&nbsp; ${SIGN_EDIT}` : SIGN_EDIT;
     }
     if (blocked) { this.mining = null; return; }
     const primary = m.l || inp.down('Space');
     const primaryHit = m.lp || inp.hit('Space');
-    if (primary) this.doPrimary(dt, primaryHit); else { this.mining = null; this.lastAct = -1; }
+    if (primary) this.doPrimary(dt, primaryHit); else { this.mining = null; this.lastAct = -1; this.holdOff = false; }
     if (m.rp || inp.hit('KeyF')) this.doSecondary();
   }
 
@@ -359,11 +384,17 @@ export class Game {
     const held = this.heldDef(), w = this.world, L = this.layer;
     // 동물을 가리키고 있으면 캐거나 놓는 대신 때린다
     if (this.mobT) { this.mining = null; if (this.mobT.inReach) this.attack(this.mobT.m); return; }
+    if (this.holdOff) { this.mining = null; return; }
     const t = this.cursor;
     if (!t.inReach) { this.mining = null; if (hit && held && held.food) this.eat(); return; }
     if (t.roof) return this.roofEdit ? this.roofPaint(t, hit) : this.mine(t, ROOF_DEF, dt, hit, () => this.removeRoof(t.x, t.y));
     const o = w.obj(L, t.x, t.y);
-    if (o !== O.NONE) return this.mine(t, OBJ[o], dt, hit);
+    if (o !== O.NONE) {
+      // 나무 판이 붙어 있으면 블록보다 판이 먼저 떨어진다. 표지판을 들고 있으면 캐는 대신 판을 붙인다
+      if (w.plaque(L, w.idx(t.x, t.y))) return this.mine(t, PLAQUE_DEF, dt, hit, () => { this.removePlaque(t.x, t.y); this.holdOff = true; });
+      if (held && held.sign && canPlaque(o)) { this.mining = null; if (hit) this.attachPlaque(t); return; }
+      return this.mine(t, OBJ[o], dt, hit);
+    }
     this.mining = null;
     const g = w.ground(L, t.x, t.y), i = w.idx(t.x, t.y);
     if (!hit && this.lastAct === i) return;
@@ -409,15 +440,20 @@ export class Game {
     const t = this.target, held = this.heldDef(), w = this.world, L = this.layer;
     if (t.inReach) {
       const o = w.obj(L, t.x, t.y), def = OBJ[o], m = w.meta(L, t.x, t.y), i = w.idx(t.x, t.y);
+      const pos = { x: t.x, y: t.y, l: L };
+      const shift = this.input.down('ShiftLeft') || this.input.down('ShiftRight');
+      if (w.plaque(L, i) && (shift || !def.use)) { this.faceTo(t); return this.ui.open('sign', pos); }   // 붙여 둔 나무 판의 글 고치기
       if (def.use || (def.crop && m >= 3)) this.faceTo(t);
       switch (def.use) {
+        case 'sign': return this.ui.open('sign', pos);
         case 'workbench': return this.ui.open('workbench');
         case 'furnace': return this.openEnt(L, i, 'furnace');
+        case 'compressor': return this.openEnt(L, i, 'compressor');
         case 'chest': return this.openEnt(L, i, 'chest');
         case 'cave': return this.travel(CAVE, t.x, t.y);
         case 'ladder': return this.travel(SURFACE, t.x, t.y);
-        case 'bed': return this.sleep(def);
-        case 'flag': return this.ui.open('flag', { x: t.x, y: t.y, l: L });
+        case 'bed': return this.useBed(def, pos);
+        case 'flag': return this.ui.open('flag', pos);
         case 'door': case 'gate': {
           // 열린 문 사이에 내가 서 있거나 동물이 끼어 있으면 닫히지 않는다
           if (m === 1 && (this.playerOverlaps(t.x, t.y) || this.mobs.overlapsTile(L, t.x, t.y))) return;
@@ -435,6 +471,7 @@ export class Game {
         if (held.tool === 'hoe') return this.till(d, w.ground(L, d.x, d.y), true);
         if (held.tool === 'shovel') return this.pave(d, w.ground(L, d.x, d.y), true, held);
       }
+      else if (held && held.sign && canPlaque(o) && !w.signs[L].has(i)) return this.attachPlaque(t);
     }
     if (held && held.food) this.eat();
   }
@@ -460,19 +497,121 @@ export class Game {
   // 상자·화로 열기: 여럿이 할 때는 한 번에 한 사람만 쓸 수 있다
   openEnt(L, i, type) {
     if (this.net.isGuest) return this.net.requestEnt(L, i);     // 방장이 허락하면 열린다
-    const e = this.ensureEnt(L, i, type);
-    if (e.owner && e.owner !== this.net.id) { this.ui.toast('다른 플레이어가 쓰고 있어요'); this.audio.play('deny'); return; }
-    if (this.net.on) e.owner = this.net.id;
-    this.ui.open(type, e);
+    const [e, e2] = this.entsAt(L, i, type);
+    const busy = (x) => x && x.owner && x.owner !== this.net.id;
+    if (busy(e) || busy(e2)) { this.ui.toast('다른 플레이어가 쓰고 있어요'); this.audio.play('deny'); return; }
+    if (this.net.on) { e.owner = this.net.id; if (e2) e2.owner = this.net.id; }
+    this.ui.open(type, e, e2);
   }
-  entClosed(e) {
+  entClosed(e, e2) {
     if (!e || !e.slots) return;
-    if (this.net.isGuest) this.net.closeEnt(); else delete e.owner;
+    if (this.net.isGuest) this.net.closeEnt(); else { delete e.owner; if (e2) delete e2.owner; }
+  }
+  // 이 칸의 상자·화로 내용물. 큰 상자면 두 칸 모두를 [앞 칸(서 · 북), 뒤 칸(동 · 남)] 순서로 돌려준다
+  entsAt(L, i, type) {
+    const e = this.ensureEnt(L, i, type), j = type === 'chest' ? this.chestPartner(L, i) : -1;
+    if (j < 0) return [e, null];
+    const e2 = this.ensureEnt(L, j, 'chest');
+    return j > i ? [e, e2] : [e2, e];
+  }
+
+  // ── 큰 상자 ──
+  // 큰 상자의 다른 반쪽이 놓인 칸 (없으면 -1)
+  chestPartner(L, i) {
+    const w = this.world, Lr = w.layers[L];
+    if (!Lr || Lr.obj[i] !== O.CHEST) return -1;
+    const d = CHEST_DIR[Lr.meta[i]];
+    if (!d) return -1;
+    const x = (i % MAP_W) + d[0], y = ((i / MAP_W) | 0) + d[1];
+    return w.inb(x, y) && w.obj(L, x, y) === O.CHEST ? w.idx(x, y) : -1;
+  }
+  // 짝이 없는 상자 옆에 짝이 없는 상자가 붙어 있으면 큰 상자로 묶는다 (좌우를 먼저, 그다음 위아래).
+  // 바라보는 방향은 먼저 놓여 있던 상자를 따른다. 내용물은 칸마다 따로 있어서, 한쪽을 부수면 그쪽 것만 쏟아진다
+  pairChest(L, x, y) {
+    const w = this.world;
+    if (w.obj(L, x, y) !== O.CHEST || w.meta(L, x, y)) return false;
+    for (const k of [4, 2, 1, 3]) {
+      const nx = x + CHEST_DIR[k][0], ny = y + CHEST_DIR[k][1];
+      if (w.obj(L, nx, ny) !== O.CHEST || w.meta(L, nx, ny)) continue;
+      w.setMeta(L, x, y, k);
+      w.setMeta(L, nx, ny, ((k + 1) & 3) + 1);                // 서로 마주 가리킨다
+      w.setRot(L, x, y, w.rot(L, nx, ny));
+      return true;
+    }
+    return false;
+  }
+  pairAllChests() {
+    const w = this.world;
+    for (let l = 0; l < 2; l++) {
+      const Lr = w.layers[l];
+      for (let i = 0; i < Lr.obj.length; i++) if (Lr.obj[i] === O.CHEST && !Lr.meta[i]) this.pairChest(l, i % MAP_W, (i / MAP_W) | 0);
+    }
+  }
+
+  // ── 돌리기 ──
+  // R: 가리킨 설치물을 시계 방향으로 90도 돌린다. 방향이 있는 설치물을 들고 빈 칸을 가리키고 있으면 놓을 방향을 돌린다
+  rotate() {
+    const w = this.world, L = this.layer, c = this.cursor, held = this.heldDef();
+    if (!c || c.roof || this.mobT || !w.inb(c.x, c.y)) return;
+    const o = w.obj(L, c.x, c.y), def = OBJ[o];
+    if (!o) {
+      const pd = held && held.place && held.place.obj ? OBJ[held.place.obj] : null;
+      if (pd && pd.rot) { this.placeRot = (this.placeRot + 1) & 3; this.audio.play('rotate'); }
+      return;
+    }
+    if (!c.inReach) { this.ui.toast('너무 멀어요. 가까이 가서 돌리세요'); this.audio.play('deny'); return; }
+    if (!def.rot) { this.ui.toast(`${def.name}: 방향이 없어서 돌릴 수 없어요`); this.audio.play('deny'); return; }
+    const r = (w.rot(L, c.x, c.y) + 1) & 3;
+    w.setRot(L, c.x, c.y, r);
+    const j = this.chestPartner(L, w.idx(c.x, c.y));          // 큰 상자는 두 칸이 함께 돈다
+    if (j >= 0) w.setRot(L, j % MAP_W, (j / MAP_W) | 0, r);
+    this.audio.play('rotate'); this.player.swing = 0.14; this.faceTo(c);
+  }
+
+  // ── 표지판 ──
+  // 글 쓰기: 세워 둔 표지판이든 블록에 붙인 나무 판이든 world.signs에 적는다
+  setSign(L, x, y, text) {
+    const w = this.world, i = w.idx(x, y), o = w.obj(L, x, y), signs = w.signs[L];
+    if (o !== O.SIGN && !signs.has(i)) return false;         // 글을 쓰는 사이에 없어졌다
+    text = cleanSign(text);
+    if ((signs.get(i) || '') === text) return false;
+    if (text || o !== O.SIGN) signs.set(i, text); else signs.delete(i);
+    if (this.net.isGuest) { this.net.flush(); this.net.send({ t: 'sg', l: L, i, text }); }
+    else this.net.all({ t: 'sg', l: L, i, text });
+    this.audio.play('write');
+    return true;
+  }
+  // 표지판을 들고 블록을 누르면: 그 블록의 앞면에 나무 판으로 붙는다
+  attachPlaque(t) {
+    const w = this.world, L = this.layer, i = w.idx(t.x, t.y);
+    if (OBJ[w.obj(L, t.x, t.y + 1)].wall || (OBJ[w.obj(L, t.x, t.y)].wall && !w.exposed(L, t.x, t.y))) {
+      this.ui.toast('앞면이 벽에 가려져 있어서 붙일 수 없어요'); this.audio.play('deny');
+      return;
+    }
+    w.signs[L].set(i, '');
+    if (this.net.isGuest) this.net.send({ t: 'sg', l: L, i, text: '' }); else this.net.all({ t: 'sg', l: L, i, text: '' });
+    this.inv.take(this.hotbar, 1);
+    this.audio.play('place'); this.player.swing = 0.16; this.faceTo(t);
+    this.stats.placed.sign = (this.stats.placed.sign || 0) + 1;
+    this.ui.open('sign', { x: t.x, y: t.y, l: L });           // 붙이자마자 글 쓰기
+  }
+  // 나무 판 떼기. 드롭은 세계의 주인만 만든다 (손님은 방장에게 부탁). remote = 남이 뗀 것을 반영하는 경우
+  removePlaque(x, y, L = this.layer, remote = false) {
+    const w = this.world, i = w.idx(x, y);
+    if (!w.plaque(L, i)) return false;
+    const cx = x * TILE + 8, cy = y * TILE + 10;
+    w.signs[L].delete(i);
+    if (this.net.isGuest) { if (!remote) this.net.send({ t: 'sx', l: L, i }); }
+    else { this.spawnDrop('sign', 1, cx, cy, { layer: L }); this.net.all({ t: 'sx', l: L, i }); }
+    if (L === this.layer && (!remote || Math.hypot(cx - this.player.x, cy - this.player.y) < 15 * TILE)) {
+      this.audio.play('break_wood'); this.burst(cx, cy, PLAQUE_DEF.pcol, 6, 50);
+    }
+    return true;
   }
 
   ensureEnt(L, i, type) {
     let e = this.world.ents[L].get(i);
-    if (!e) {
+    if (!e || e.type !== type) {
       e = type === 'chest' ? { type, slots: new Array(27).fill(null) } : { type, slots: [null, null, null], burn: 0, burnMax: 0, prog: 0 };
       this.world.ents[L].set(i, e);
     }
@@ -531,9 +670,13 @@ export class Game {
       if (e && e.owner && e.owner !== this.net.id) { if (!remote) { this.ui.toast('다른 플레이어가 쓰고 있어요'); this.audio.play('deny'); } return; }
       const drops = typeof def.drops === 'function' ? def.drops(m) : def.drops;
       if (drops) for (const [id, min, max, chance = 1] of drops) if (Math.random() < chance) this.spawnDrop(id, randi(min, max), cx, cy, { layer: L });
+      if (w.plaque(L, i)) this.spawnDrop('sign', 1, cx, cy, { layer: L });      // 붙어 있던 나무 판도 함께 떨어진다
       if (e) { for (const s of e.slots) if (s) this.spawnDrop(s.id, s.n, cx, cy, { layer: L }); w.ents[L].delete(i); this.ui.entGone(e); }
       w.grow[L].delete(i);
+      const pj = this.chestPartner(L, i);
       w.setObj(L, x, y, O.NONE, 0);
+      // 큰 상자의 반쪽을 부쉈다: 남은 반쪽은 보통 상자로 돌아가고, 옆에 다른 상자가 있으면 그것과 다시 묶인다
+      if (pj >= 0) { const px = pj % MAP_W, py = (pj / MAP_W) | 0; w.setMeta(L, px, py, 0); this.pairChest(L, px, py); }
     }
     if (L === this.layer && (!remote || Math.hypot(cx - this.player.x, cy - this.player.y) < 15 * TILE)) {
       this.audio.play('break_' + def.mat);
@@ -588,9 +731,9 @@ export class Game {
       if (pl.on === 'sand' && g !== G.SAND) return fail('모래에만 심을 수 있어요');
       if (od.solid && this.playerOverlaps(x, y)) return fail('너무 가까워요. 한 칸 떨어져서 놓으세요');
       if (od.solid && this.mobs.overlapsTile(L, x, y)) return fail('동물이 있어서 놓을 수 없어요');
-      w.setObj(L, x, y, pl.obj, pl.meta || 0);
-      if (pl.obj === O.CHEST) this.ensureEnt(L, i, 'chest');
-      if (pl.obj === O.FURNACE) this.ensureEnt(L, i, 'furnace');
+      w.setObj(L, x, y, pl.obj, pl.meta || 0, od.rot ? this.placeRot : 0);
+      if (entType(pl.obj)) this.ensureEnt(L, i, entType(pl.obj));
+      if (pl.obj === O.CHEST) this.pairChest(L, x, y);
       if (od.grow) w.grow[L].set(i, rand(od.grow[0], od.grow[1]));
       if (pl.grow && od.harvest) w.grow[L].set(i, rand(od.harvest.regrow[0], od.harvest.regrow[1]));
       this.audio.play(od.mat === 'stone' ? 'place_stone' : 'place');
@@ -602,6 +745,7 @@ export class Game {
     checkQuests(this);
     this.updateSeen();
     if (it.place && it.place.obj === O.FLAG) this.ui.open('flag', { x, y, l: L });   // 세우자마자 색 고르기
+    if (it.place && it.place.obj === O.SIGN) this.ui.open('sign', { x, y, l: L });   // 세우자마자 글 쓰기
   }
 
   eat() {
@@ -658,11 +802,21 @@ export class Game {
   }
   // 양모 침대에서 낮잠을 잘 수 있는 시간인가 (새벽 5시 ~ 저녁 7시)
   get napTime() { const h = this.hour; return h >= 5 && h < 19; }
+  // 침대를 쓰면 그 침대가 리스폰 지점이 된다 (잠들지 못해도)
+  useBed(def, pos) {
+    const b = this.player.bed;
+    if (!b || b.l !== pos.l || b.x !== pos.x || b.y !== pos.y) {
+      this.player.bed = { l: pos.l, x: pos.x, y: pos.y };
+      this.ui.toast('이 침대를 리스폰 지점으로 정했어요', 'good');
+    }
+    this.sleep(def);
+  }
   // 침대: 밤에 자면 다음 날 아침까지. 양모 침대(def.nap)는 낮에도 누울 수 있는데, 그때는 그날 저녁까지만 잔다
   sleep(def) {
     const wool = !!(def && def.nap), nap = wool && this.napTime;
     if (this.net.isGuest) { this.ui.toast('여럿이 할 때는 방장만 시간을 넘길 수 있어요'); return; }
     if (!nap && this.napTime) { this.ui.toast('아직 졸리지 않아요. 저녁 7시 이후에 잘 수 있어요'); return; }
+    if (!wool && this.player.hunger <= 0) { this.ui.toast('배가 너무 고파서 잠이 오지 않아요. 먼저 무언가 드세요'); return; }
     this.audio.play('sleep');
     this.fadeTo(() => {
       const now = this.time % DAY_LENGTH;
@@ -678,6 +832,75 @@ export class Game {
     }, 0.8);
   }
   fadeTo(cb, dur = 0.35) { this.fade = { t: 0, dur, phase: 'out', cb }; }
+
+  // ── 포만감 · 그로기 · 쓰러짐 ──
+  // 포만감이 바닥나는 순간 그로기 상태가 된다: 기어가듯 느려지고, 2분 안에 아무것도 먹지 못하면 쓰러진다
+  updateHunger(dt) {
+    const p = this.player;
+    if (this.dying) return;
+    p.hunger = Math.max(0, p.hunger - dt * 0.085);
+    if (p.hunger > 0) {
+      if (p.groggy > 0) { p.groggy = 0; this.ui.toast('기운을 차렸어요', 'good'); }
+      return;
+    }
+    if (!(p.groggy > 0)) {
+      p.groggy = GROGGY_TIME;
+      this.ui.toast('배가 너무 고파 쓰러지기 직전이에요! 2분 안에 무언가 먹어야 해요');
+      this.audio.play('groggy');
+    }
+    if (this.fade) return;                 // 화면이 넘어가는 동안에는 시간이 가지 않는다
+    p.groggy -= dt;
+    if (p.groggy <= 0) this.die();
+  }
+  // 쓰러짐: 가방에 있던 것을 그 자리에 한꺼번에 쏟고, 리스폰 지점(침대)이나 처음 시작한 자리에서 다시 일어난다
+  die() {
+    if (this.dying) return;
+    this.dying = true;
+    const p = this.player, at = { x: p.x, y: p.y, l: this.layer };
+    this.ui.close(true);
+    if (this.ui.mapOpen) this.ui.toggle('map');
+    this.mining = null;
+    const sl = this.inv.slots;
+    for (let k = 0; k < sl.length; k++) {
+      const s = sl[k];
+      if (!s) continue;
+      const a = Math.random() * Math.PI * 2, v = rand(35, 95);
+      this.spawnDrop(s.id, s.n, at.x + rand(-3, 3), at.y - 5 + rand(-3, 3), { layer: at.l, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.7, t: -4 });
+      sl[k] = null;
+    }
+    this.ui.dirty = true;
+    this.burst(at.x, at.y - 8, [0xffffff, 0xf4c430, 0xe2504a], 22, 90, 0.7);
+    this.audio.play('death');
+    this.fadeTo(() => {
+      const sp = this.respawnPoint();
+      this.layer = sp.l; p.x = sp.x; p.y = sp.y; p.dir = 'd'; p.moving = false;
+      p.hunger = RESPAWN_HUNGER; p.groggy = 0;
+      this.dying = false;
+      this.renderer.snap();
+      this.updateSeen();
+      this.ui.banner('쓰러졌습니다');
+      this.ui.toast(`가방에 있던 것은 쓰러진 자리(X ${Math.floor(at.x / TILE)} · Y ${Math.floor(at.y / TILE)}${at.l === CAVE ? ' · 지하' : ''})에 떨어져 있어요`);
+      if (sp.why) this.ui.toast(sp.why);
+      this.save();
+    }, 1.1);
+  }
+  // 다시 일어날 자리: 리스폰 지점으로 정한 침대 옆. 침대가 없으면(정한 적이 없거나 부서졌으면) 이 세계를 처음 시작한 자리
+  respawnPoint() {
+    const w = this.world, p = this.player, b = p.bed;
+    const at = (l, x, y, why) => ({ l, x: x * TILE + 8, y: y * TILE + 10, why });
+    let why = '';
+    if (b) {
+      if (OBJ[w.obj(b.l, b.x, b.y)].use === 'bed') {
+        for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) if (!w.solid(b.l, b.x + dx, b.y + dy)) return at(b.l, b.x + dx, b.y + dy);
+        why = '침대 둘레가 막혀 있어서 처음 시작한 자리에서 일어났어요';
+      } else { p.bed = null; why = '리스폰 지점으로 정한 침대가 없어져서 처음 시작한 자리에서 일어났어요'; }
+    }
+    const s = w.spawn;
+    for (let r = 0; r <= 10; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) === r && !w.solid(SURFACE, s.x + dx, s.y + dy)) return at(SURFACE, s.x + dx, s.y + dy, why);
+    }
+    return at(SURFACE, s.x, s.y, why);
+  }
   updateFade(dt) {
     const f = this.fade;
     f.t += dt;
@@ -694,7 +917,7 @@ export class Game {
   // 드롭은 세계의 주인이 만든다. 손님은 방장에게 부탁하고, 방장이 만든 것이 모두에게 보인다
   spawnDrop(id, n, x, y, o = {}) {
     const d = {
-      id, n, x, y, vx: o.vx ?? rand(-22, 22), vy: o.vy ?? rand(-22, 14), z: 3, vz: rand(55, 95),
+      id, n, x, y, vx: o.vx ?? rand(-22, 22), vy: o.vy ?? rand(-22, 14), z: o.z ?? 3, vz: o.z === 0 ? 0 : rand(55, 95),
       t: o.t ?? 0, layer: o.layer ?? this.layer, age: 0,
     };
     if (this.net.isGuest) { this.net.send({ t: 'ds', d }); return null; }
@@ -726,7 +949,12 @@ export class Game {
     const p = this.player, L = this.layer, guest = this.net.isGuest, now = performance.now();
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
-      d.age += dt;
+      // 컨베이어 벨트: 바닥에 놓인 물건을 실어 나른다. 세계의 주인은 지금 보고 있지 않은 층의 벨트도 돌린다
+      let belt = 0;
+      if (d.layer !== L) { if (!guest) { d.z = 0; belt = this.beltMove(d, dt, i); } }
+      else belt = this.beltMove(d, dt, i);
+      if (belt === 2) continue;                           // 벨트 끝의 상자 · 기계 안으로 들어갔다
+      if (!belt) d.age += dt;                             // 벨트 위에 있는 동안에는 낡지 않는다
       if (!guest && d.age > 900) { this.drops.splice(i, 1); this.net.dropGone(d.uid, null); continue; }
       if (d.layer !== L) continue;
       d.t += dt;
@@ -734,12 +962,13 @@ export class Game {
       if (d.z < 0) { d.z = 0; d.vz = d.vz < -40 ? -d.vz * 0.4 : 0; d.vx *= 0.5; d.vy *= 0.5; }
       d.x += d.vx * dt; d.y += d.vy * dt;
       const fr = Math.pow(0.02, dt); d.vx *= fr; d.vy *= fr;
-      if (d.t < 0.4) continue;
+      if (d.t < 0.4 || this.dying) continue;
       const dx = p.x - d.x, dy = p.y - 6 - d.y, dist = Math.hypot(dx, dy);
-      if (dist < 38 && this.inv.space(d.id) > 0) {
-        const sp = 60 + (38 - dist) * 6;
+      // 벨트 위의 물건은 끌려오지 않는다 (지나가기만 해도 쓸어 담으면 자동화가 안 된다). 직접 밟아야 줍는다
+      if (dist < (belt ? 9 : 38) && this.inv.space(d.id) > 0) {
+        const sp = belt ? 0 : 60 + (38 - dist) * 6;
         d.x += (dx / (dist || 1)) * sp * dt; d.y += (dy / (dist || 1)) * sp * dt;
-        if (dist < 8) {
+        if (dist < (belt ? 9 : 8)) {
           if (guest) {
             // 두 사람이 동시에 줍지 않도록 방장에게 물어본다
             if (!(d.claim > now)) { d.claim = now + 1000; this.net.send({ t: 'dq', id: d.uid }); }
@@ -749,6 +978,89 @@ export class Game {
             this.collect(d.id, d.n);
           }
         }
+      }
+    }
+  }
+
+  // ── 컨베이어 벨트 ──
+  // 벨트 위의 물건 하나를 한 걸음 옮긴다. i = this.drops에서의 자리.
+  // 돌려주는 값: 0 벨트 위가 아님 · 1 벨트 위 · 2 벨트 끝의 상자 · 기계에 모두 들어가 사라짐
+  beltMove(d, dt, i) {
+    const w = this.world, Lr = w.layers[d.layer];
+    const tx = Math.floor(d.x / TILE), ty = Math.floor(d.y / TILE);
+    if (!w.inb(tx, ty)) return 0;
+    const ti = ty * MAP_W + tx;
+    if (Lr.obj[ti] !== O.BELT) return 0;
+    if (d.z > 0) return 1;                               // 아직 떨어지는 중: 벨트 위로 치되, 닿은 뒤부터 실려 간다
+    const [dx, dy] = ROT_DIR[Lr.rot[ti]], step = BELT_SPEED * dt;
+    d.vx = d.vy = 0;
+    // 띠의 가운데 줄로 모은다 (아이템 그림은 발 위치 기준이라 가운데보다 조금 아래)
+    if (dx) d.y += clampN(ty * TILE + 13 - d.y, -step, step); else d.x += clampN(tx * TILE + 8 - d.x, -step, step);
+    const nx = d.x + dx * step, ny = d.y + dy * step;
+    const ntx = Math.floor(nx / TILE), nty = Math.floor(ny / TILE);
+    if (ntx !== tx || nty !== ty) {
+      // 벨트의 끝: 다음 칸이 벨트면 그대로 넘어가고, 상자 · 기계면 넣고, 막혀 있으면 그 앞에서 기다린다
+      const no = w.obj(d.layer, ntx, nty);
+      if (no !== O.BELT) {
+        const type = entType(no);
+        if (type) return !this.net.isGuest && this.beltInsert(d, i, w.idx(ntx, nty), type) ? 2 : 1;
+        if (w.solid(d.layer, ntx, nty)) return 1;
+      }
+    }
+    d.x = nx; d.y = ny;
+    return 1;
+  }
+  // 벨트 끝에 닿은 물건을 상자 · 기계에 넣는다. 모두 들어가서 드롭이 사라졌으면 true
+  beltInsert(d, di, ti, type) {
+    const L = d.layer, max = maxStack(d.id), busy = (e) => e && e.owner && e.owner !== this.net.id;   // 손님이 열어 둔 것은 건드리지 않는다
+    let left = d.n;
+    const into = (e, a, b) => {
+      for (let k = a; k < b && left > 0; k++) { const s = e.slots[k]; if (s && s.id === d.id && s.n < max) { const n = Math.min(left, max - s.n); s.n += n; left -= n; } }
+      for (let k = a; k < b && left > 0; k++) { if (!e.slots[k]) { const n = Math.min(left, max); e.slots[k] = { id: d.id, n }; left -= n; } }
+      e.touched = true;
+    };
+    if (type === 'chest') {
+      const [e, e2] = this.entsAt(L, ti, 'chest');
+      if (busy(e) || busy(e2)) return false;
+      into(e, 0, 27);
+      if (left > 0 && e2) into(e2, 0, 27);
+    } else {
+      const e = this.ensureEnt(L, ti, type);
+      if (busy(e)) return false;
+      const rec = MACHINE[type][d.id], fuel = ITEMS[d.id].fuel, src = e.slots[0];
+      if (rec && (!src || src.id === d.id || !fuel)) into(e, 0, 1);       // 재료 칸
+      else if (fuel) into(e, 1, 2);                                        // 연료 칸
+    }
+    if (left === d.n) return false;
+    if (this.ui.ent || this.ui.ent2) this.ui.dirty = true;
+    this.drops.splice(di, 1);
+    this.net.dropGone(d.uid, null);
+    if (left > 0) this.spawnDrop(d.id, left, d.x, d.y, { layer: L, vx: 0, vy: 0, t: 1, z: 0 });   // 다 들어가지 못한 나머지는 그 자리에 남는다
+    return true;
+  }
+  // 벨트의 뒤쪽에 상자 · 기계가 붙어 있으면 거기서 물건을 하나씩 꺼내 벨트에 올린다 (기계는 결과 칸에서만)
+  beltPull() {
+    const w = this.world, busy = (e) => e && e.owner && e.owner !== this.net.id;
+    for (let l = 0; l < 2; l++) {
+      const belts = w.belts[l], Lr = w.layers[l];
+      if (!belts.size) continue;
+      const load = new Set();                            // 물건이 올라가 있는 벨트 칸
+      for (const d of this.drops) if (d.layer === l) load.add(Math.floor(d.y / TILE) * MAP_W + Math.floor(d.x / TILE));
+      for (const i of belts) {
+        if (load.has(i)) continue;                       // 앞의 물건이 빠져나가야 다음 것을 꺼낸다
+        const [dx, dy] = ROT_DIR[Lr.rot[i]], x = i % MAP_W, y = (i / MAP_W) | 0;
+        const type = entType(w.obj(l, x - dx, y - dy));
+        if (!type) continue;
+        const [e, e2] = this.entsAt(l, w.idx(x - dx, y - dy), type);
+        if (busy(e) || busy(e2)) continue;
+        let from = e, k = type === 'chest' ? e.slots.findIndex(Boolean) : e.slots[2] ? 2 : -1;
+        if (k < 0 && e2) { from = e2; k = e2.slots.findIndex(Boolean); }
+        if (k < 0) continue;
+        const s = from.slots[k];
+        if (--s.n <= 0) from.slots[k] = null;
+        from.touched = true;
+        if (this.ui.ent || this.ui.ent2) this.ui.dirty = true;
+        this.spawnDrop(s.id, 1, x * TILE + 8 - dx * 5, y * TILE + 13 - dy * 5, { layer: l, vx: 0, vy: 0, t: 0, z: 0 });   // 튀어 오르지 않고 띠 위에 바로 놓인다
       }
     }
   }
@@ -799,12 +1111,12 @@ export class Game {
     }
   }
 
-  // ── 화로 ──
+  // ── 화로 · 압축기 ── (연료를 태워 재료를 바꾸는 기계. 조합법만 다르다)
   tickFurnaces(dt) {
     const w = this.world;
     for (let l = 0; l < 2; l++) {
       for (const [i, e] of w.ents[l]) {
-        if (e.type !== 'furnace') continue;
+        if (!MACHINE[e.type]) continue;
         if (e.owner && e.owner !== this.net.id) continue;      // 손님이 열어 둔 화로는 그 손님이 돌리는 중
         this.tickFurnace(l, i, e, dt);
       }
@@ -813,8 +1125,8 @@ export class Game {
   tickFurnace(l, i, e, dt) {
     const w = this.world;
     const [src, fuel, out] = e.slots;
-    const rec = src ? SMELT[src.id] : null;
-    const can = !!rec && (!out || (out.id === rec.out && out.n < maxStack(rec.out)));
+    const rec = src ? MACHINE[e.type][src.id] : null, need = rec ? rec.n || 1 : 1;       // 압축기는 재료 여러 개가 판 하나가 된다
+    const can = !!rec && src.n >= need && (!out || (out.id === rec.out && out.n < maxStack(rec.out)));
     if (e.burn <= 0 && can && fuel && ITEMS[fuel.id].fuel) {
       e.burn = e.burnMax = ITEMS[fuel.id].fuel;
       fuel.n--; if (fuel.n <= 0) e.slots[1] = null;
@@ -827,12 +1139,15 @@ export class Game {
         e.prog += dt;
         if (e.prog >= rec.time) {
           e.prog = 0;
-          src.n--; if (src.n <= 0) e.slots[0] = null;
+          src.n -= need; if (src.n <= 0) e.slots[0] = null;
           if (e.slots[2]) e.slots[2].n++; else e.slots[2] = { id: rec.out, n: 1 };
           this.stats.smelted[rec.out] = (this.stats.smelted[rec.out] || 0) + 1;
           e.touched = true;
           checkQuests(this);
-          if (l === this.layer) this.audio.play('smelt');
+          if (l === this.layer) {
+            const k = clampN(1.25 - Math.hypot((i % MAP_W) * TILE + 8 - this.player.x, ((i / MAP_W) | 0) * TILE + 8 - this.player.y) / (14 * TILE), 0, 1);   // 멀리 있는 기계 소리는 작게
+            if (k > 0) this.audio.play(e.type === 'compressor' ? 'press' : 'smelt', k);
+          }
         }
       } else e.prog = 0;
     } else if (e.prog > 0) e.prog = Math.max(0, e.prog - dt * 2);

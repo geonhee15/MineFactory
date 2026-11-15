@@ -16,7 +16,38 @@ function percentiles(arr, mask, ps) {
 export function generate(world) {
   genSurface(world);
   genCave(world);
+  world.oreV = ORE_VERSION;
   return world;
+}
+
+// ── 광맥 ──
+// [광석, 광맥 수, 가장 짧은 길이, 가장 긴 길이]. 광맥은 돌 속 아무 데서나 시작하므로, 수가 많을수록 통로 벽에서 자주 보인다
+const B = 3; // 기반암 테두리 두께
+const ORES = [[O.COAL_ORE, 1500, 5, 12], [O.IRON_ORE, 1500, 5, 11], [O.COPPER_ORE, 950, 4, 9], [O.GOLD_ORE, 300, 2, 6]];
+const ORES_V1 = { [O.COAL_ORE]: 1150, [O.IRON_ORE]: 760, [O.COPPER_ORE]: 620, [O.GOLD_ORE]: 180 };   // 0.14.0까지의 광맥 수
+export const ORE_VERSION = 2;
+const isRock = (o) => o === O.ROCK || o === O.ANDESITE || o === O.GRANITE;
+// 무작위 걸음으로 벽 속에 덩어리를 만든다. only(i): 이 칸을 바꿔도 되는가
+function veins(L, rnd, type, count, minLen, maxLen, only) {
+  const put = (i) => { if (isRock(L.obj[i]) && (!only || only(i))) L.obj[i] = type; };
+  for (let n = 0; n < count; n++) {
+    let x = B + 1 + ((rnd() * (W - 2 * B - 2)) | 0), y = B + 1 + ((rnd() * (H - 2 * B - 2)) | 0);
+    const len = minLen + ((rnd() * (maxLen - minLen + 1)) | 0);
+    for (let k = 0; k < len; k++) {
+      put(y * W + x);
+      if (rnd() < 0.45) put((y + ((rnd() * 3) | 0) - 1) * W + x + ((rnd() * 3) | 0) - 1);
+      x = clamp(x + ((rnd() * 3) | 0) - 1, B + 1, W - B - 2);
+      y = clamp(y + ((rnd() * 3) | 0) - 1, B + 1, H - B - 2);
+    }
+  }
+}
+// 광석이 적던 예전 규칙으로 만든 세계: 아직 가 보지 않은 돌 속에만 광맥을 더 넣어, 새 세계와 비슷한 양으로 맞춘다
+export function enrichOres(world) {
+  if ((world.oreV || 1) >= ORE_VERSION) return false;
+  const L = world.layers[CAVE], rnd = mulberry32((world.seed ^ 0x51ed270b) >>> 0);
+  for (const [type, count, a, b] of ORES) veins(L, rnd, type, count - ORES_V1[type], a, b, (i) => !L.seen[i]);
+  world.oreV = ORE_VERSION;
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -188,7 +219,6 @@ function genCave(world) {
   const nA = new Noise(seed + 11), nB = new Noise(seed + 12), nC = new Noise(seed + 13);
   const nR = new Noise(seed + 14), nW = new Noise(seed + 15);
   let open = new Uint8Array(N);
-  const B = 3; // 기반암 테두리 두께
 
   for (let y = B; y < H - B; y++) for (let x = B; x < W - B; x++) {
     const a = nA.fbm(x / 42, y / 42, 3), b = nB.fbm(x / 30 + 100, y / 30, 3), c = nC.fbm(x / 28, y / 28, 2);
@@ -261,25 +291,8 @@ function genCave(world) {
     L.obj[i] = o;
   }
 
-  // 광맥: 무작위 걸음으로 벽 속에 덩어리를 만든다
-  const base = (o) => o === O.ROCK || o === O.ANDESITE || o === O.GRANITE;
-  const veins = (type, count, minLen, maxLen) => {
-    for (let n = 0; n < count; n++) {
-      let x = B + 1 + ((rnd() * (W - 2 * B - 2)) | 0), y = B + 1 + ((rnd() * (H - 2 * B - 2)) | 0);
-      const len = minLen + ((rnd() * (maxLen - minLen + 1)) | 0);
-      for (let k = 0; k < len; k++) {
-        const i = y * W + x;
-        if (base(L.obj[i])) L.obj[i] = type;
-        if (rnd() < 0.45) { const j = (y + ((rnd() * 3) | 0) - 1) * W + x + ((rnd() * 3) | 0) - 1; if (base(L.obj[j])) L.obj[j] = type; }
-        x = clamp(x + ((rnd() * 3) | 0) - 1, B + 1, W - B - 2);
-        y = clamp(y + ((rnd() * 3) | 0) - 1, B + 1, H - B - 2);
-      }
-    }
-  };
-  veins(O.COAL_ORE, 1150, 5, 12);
-  veins(O.IRON_ORE, 760, 4, 9);
-  veins(O.COPPER_ORE, 620, 4, 8);
-  veins(O.GOLD_ORE, 180, 2, 5);
+  // 광맥
+  for (const [type, count, a, b] of ORES) veins(L, rnd, type, count, a, b);
 
   // 수정: 벽 옆 빈 바닥에 드물게
   for (let n = 0; n < 2600; n++) {

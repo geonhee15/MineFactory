@@ -407,6 +407,41 @@ export function buildItemSprites(atlas, { texs }) {
   }
   I('fence', fit(fromAtlas(atlas, 'o_fence_10')));
   I('fence_gate', fit(fromAtlas(atlas, 'o_gate_h_0')));
+  I('sign', fit(fromAtlas(atlas, 'o_sign_1')));
+  // 공장
+  I('belt', fromAtlas(atlas, 'o_belt_r3_0').outline(K));
+  I('compressor', fit(fromAtlas(atlas, 'o_compressor_0')));
+  { // 기계 틀: 쇠로 짠 네모난 뼈대
+    const p = new Pix(16, 16), l = 0xa9b2c2, b = 0x8791a3, d = 0x646d80;
+    p.rect(2, 3, 12, 11, b);
+    for (let y = 5; y < 12; y++) for (let x = 4; x < 12; x++) p.clear(x, y);
+    p.rect(2, 3, 12, 1, l); p.rect(2, 3, 1, 11, l); p.rect(13, 4, 1, 10, d); p.rect(3, 13, 11, 1, d);
+    p.line(4, 11, 11, 5, d); p.line(4, 5, 11, 11, b);
+    for (const [x, y] of [[3, 4], [12, 4], [3, 12], [12, 12]]) p.set(x, y, 0xd6dce8);
+    I('machine_frame', p.outline(K));
+  }
+  { // 피스톤: 통과 밀대
+    const p = new Pix(16, 16);
+    p.rect(3, 7, 8, 6, 0x8791a3); p.rect(3, 7, 8, 1, 0xa9b2c2); p.rect(3, 12, 8, 1, 0x646d80); p.rect(5, 8, 1, 4, 0x646d80);
+    p.rect(11, 9, 3, 2, 0xd6dce8); p.rect(11, 10, 3, 1, 0xa9b2c2);
+    p.rect(13, 6, 2, 8, 0x646d80); p.rect(13, 6, 1, 8, 0x8791a3);
+    p.rect(2, 9, 1, 2, 0x3e4352);
+    I('piston', p.outline(K));
+  }
+  // 판: 비스듬히 놓인 얇은 판. 돌 판에는 알갱이를 뿌린다
+  const plate = (l, b, d, speck) => {
+    const p = new Pix(16, 16);
+    for (let y = 0; y < 7; y++) for (let x = 0; x < 11; x++) p.set(2 + x + Math.floor((6 - y) / 2), 4 + y, y === 0 ? l : b);
+    for (let x = 0; x < 11; x++) { p.set(2 + x, 11, d); p.set(2 + x, 12, d); }
+    for (let x = 0; x < 4; x++) p.set(4 + x, 5 + (x & 1), l);
+    if (speck) for (const [x, y] of [[6, 7], [9, 6], [11, 8], [7, 9], [10, 10], [5, 9]]) p.set(x, y, speck);
+    return p.outline(K);
+  };
+  I('granite_plate', plate(0xc9917c, 0xa9705f, 0x82524a, 0x5e3c38));
+  I('andesite_plate', plate(0xb5b7b0, 0x8e908c, 0x6c6e69, 0x55574f));
+  I('iron_plate', plate(0xeef2f7, 0xc5ccd8, 0x7f8898));
+  I('gold_plate', plate(0xfff1a0, 0xf2c53d, 0xc08f1a));
+  I('copper_plate', plate(0xffc08a, 0xe8894a, 0x9a4c20));
 
   // 동물에게서 얻는 것
   { // 소고기: 마블링이 있는 붉은 살

@@ -1,7 +1,7 @@
 // 월드 렌더러: 지형 → (행 단위 y정렬) 오브젝트·플레이어 → 조명 → 커서
 import { TILE, MAP_W, MAP_H, SURFACE, CAVE, WALL_LIFT, ROOF_LIFT, PLAYER_COLORS } from '../config.js';
 import { GROUND } from '../data/ground.js';
-import { OBJ, O, joins } from '../data/objects.js';
+import { OBJ, O, joins, canPlaque } from '../data/objects.js';
 import { MOBS, MOB_KEYS } from '../data/mobs.js';
 import { ITEMS } from '../data/items.js';
 import { hash2, clamp } from '../rng.js';
@@ -53,9 +53,14 @@ export class Renderer {
     this.os = [];
     for (const d of OBJ) {
       if (!d || !d.spr) continue;
-      const b = { late: (d.solid || d.tall) && !d.wall };
+      const b = { late: (d.solid || d.tall || d.sort) && !d.wall };
       if (d.connect) { b.conn = []; for (let m = 0; m < 16; m++) b.conn.push(get(`${d.spr}_${m}`)); }
       else if (d.gate) b.gate = ['h', 'v'].map((n) => [get(`${d.spr}_${n}_0`), get(`${d.spr}_${n}_1`)]);
+      else if (d.belt) b.belt = [0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((f) => get(`${d.spr}_r${r}_${f}`)));   // [방향][흐르는 프레임]
+      else if (d.rot) {
+        // 방향이 있는 설치물: rots[방향][meta]
+        b.rots = [0, 1, 2, 3].map((r) => Array.from({ length: d.byMeta || 1 }, (_, m) => get(`${d.spr}_${m}${r ? '_r' + r : ''}`)));
+      }
       else if (d.frames && d.byMeta) {
         b.mf = [];
         for (let m = 0; m < d.byMeta; m++) { const fr = []; for (let f = 0; f < d.frames; f++) fr.push(get(`${d.spr}_${m}_${f}`)); b.mf.push(fr); }
@@ -65,7 +70,11 @@ export class Renderer {
       else { b.vars = []; for (let v = 0; v < d.n; v++) b.vars.push(get(`${d.spr}_${v}`)); }
       this.os[d.id] = b;
     }
-    this.furnB = get('o_furnace_1b');
+    this.furnB = [0, 1, 2, 3].map((r) => get('o_furnace_1b' + (r ? '_r' + r : '')));
+    this.compB = [0, 1, 2, 3].map((r) => get('o_compressor_1b' + (r ? '_r' + r : '')));   // 압축기가 누르는 순간
+    // 큰 상자: [가로 · 세로][방향][앞 칸(서 · 북) · 뒤 칸(동 · 남)]
+    this.chest2 = ['h', 'v'].map((n) => [0, 1, 2, 3].map((r) => [get(`o_chest2_${n}_r${r}_0`), get(`o_chest2_${n}_r${r}_1`)]));
+    this.plq = [get('plq_0'), get('plq_1')];      // 블록에 붙인 나무 판 (빈 것 · 글이 적힌 것)
     this.roofSpr = [get('r_roof_0'), get('r_roof_1')];
     this.roofRim = { N: get('r_rim_N'), W: get('r_rim_W'), E: get('r_rim_E'), S: get('r_rim_S') };
     this.dark = [get('w_dark_0'), get('w_dark_1')];
@@ -112,22 +121,31 @@ export class Renderer {
   snap() { /* 카메라는 매 프레임 플레이어에 고정되므로 따로 할 일 없음 */ }
   screenToWorld(mx, my) { return { x: this.ox + mx / this.zoom, y: this.oy + my / this.zoom }; }
 
-  objSprite(def, meta, x, y) {
+  // rot을 주지 않으면 그 칸에 놓인 방향을 쓴다 (설치 미리보기는 놓을 방향을 넘긴다)
+  objSprite(def, meta, x, y, rot) {
     const b = this.os[def.id];
     if (!b) return null;
+    const w = this.world, L = this.layerNo;
+    if (rot === undefined) rot = w ? w.rot(L, x, y) : 0;
     if (b.conn || b.gate) {
       // 울타리 · 울타리 문: 상하좌우 이웃을 보고 이어진 모양을 고른다
-      const w = this.world, L = this.layerNo, j = (dx, dy) => (w && joins(w.obj(L, x + dx, y + dy)) ? 1 : 0);
+      const j = (dx, dy) => (w && joins(w.obj(L, x + dx, y + dy)) ? 1 : 0);
       const n = j(0, -1), e = j(1, 0), s = j(0, 1), we = j(-1, 0);
       if (b.conn) return b.conn[n | (e << 1) | (s << 2) | (we << 3)];
-      return b.gate[(n || s) && !(e || we) ? 1 : 0][meta ? 1 : 0];
+      return b.gate[!!((n || s) && !(e || we)) !== !!(rot & 1) ? 1 : 0][meta ? 1 : 0];   // 돌리면 가로 ↔ 세로가 바뀐다
+    }
+    if (b.belt) return b.belt[rot][((this.t * 16) | 0) & 3];
+    if (b.rots) {
+      if (def.id === O.CHEST && meta) return this.chest2[meta & 1][rot][meta === 2 || meta === 3 ? 0 : 1];   // 큰 상자의 반쪽
+      if (def.id === O.SIGN) meta = w && w.signs[L].get(y * MAP_W + x) ? 1 : 0;                              // 글이 적힌 표지판
+      if (def.id === O.FURNACE && meta === 1 && ((this.t * 7) | 0) % 2) return this.furnB[rot];
+      if (def.id === O.COMPRESSOR && meta === 1 && ((this.t * 2.5) | 0) % 2) return this.compB[rot];
+      const set = b.rots[rot];
+      return set[Math.min(meta, set.length - 1)];
     }
     if (b.mf) return b.mf[Math.min(meta, b.mf.length - 1)][((this.t * 5 + x * 3 + y) | 0) % b.mf[0].length];
     if (b.anim) return b.anim[((this.t * 8 + x * 3 + y) | 0) % b.anim.length];
-    if (b.metas) {
-      if (def.id === O.FURNACE && meta === 1 && ((this.t * 7) | 0) % 2) return this.furnB;
-      return b.metas[Math.min(meta, b.metas.length - 1)];
-    }
+    if (b.metas) return b.metas[Math.min(meta, b.metas.length - 1)];
     return b.vars[this.varr[y * MAP_W + x] % b.vars.length];
   }
   col(c) { let s = this.css.get(c); if (!s) { s = hex(c); this.css.set(c, s); } return s; }
@@ -137,7 +155,8 @@ export class Renderer {
     this.world = game.world; this.layerNo = game.layer;
     const ctx = this.ctx, img = this.img, w = game.world, vw = this.vw, vh = this.vh;
     if (!w) { ctx.fillStyle = '#0b0910'; ctx.fillRect(0, 0, vw, vh); return; }
-    const L = game.layer, Lr = w.layers[L], ground = Lr.ground, objs = Lr.obj, metas = Lr.meta;
+    const L = game.layer, Lr = w.layers[L], ground = Lr.ground, objs = Lr.obj, metas = Lr.meta, rots = Lr.rot;
+    const signs = w.signs[L], hasSigns = signs.size > 0;
     const title = game.state === 'title', p = game.player;
     const tx = title ? this.cam.x : Math.round(p.x), ty = title ? this.cam.y : Math.round(p.y) - 8;
     const ox = this.ox = clamp(Math.round(tx - vw / 2), 0, Math.max(0, MAP_W * TILE - vw));
@@ -204,6 +223,9 @@ export class Renderer {
     const yEnd = Math.min(MAP_H - 1, y1 + 3), xs = Math.max(0, x0 - 1), xe = Math.min(MAP_W - 1, x1 + 1);
     for (let y = y0; y <= yEnd; y++) {
       const py = y * TILE - oy;
+      // 이 줄보다 북쪽에 서 있는 것은 이 줄의 벽보다 먼저 그린다.
+      // (벽에 바짝 붙으면 발이 벽의 솟은 윗면에 가려져야지, 벽 위에 올라선 것처럼 보이면 안 된다)
+      while (ei < ents.length && ents[ei].y < y * TILE) this.drawEnt(ents[ei++], game, D, ox, oy);
       for (let pass = 0; pass < 2; pass++) {
         for (let x = xs; x <= xe; x++) {
           const i = y * MAP_W + x, o = objs[i];
@@ -215,10 +237,11 @@ export class Renderer {
           if (def.wall) {
             const vis = L !== CAVE || w.exposed(L, x, y);
             if (!vis) { D(this.dark[this.varr[i] & 1], px, py - WALL_LIFT); continue; }
-            D(b.vars[this.varr[i] % b.vars.length], px, py - WALL_LIFT);
+            D(b.rots ? b.rots[rots[i]][0] : b.vars[this.varr[i] % b.vars.length], px, py - WALL_LIFT);
             if (!isWall(x, y - 1)) D(this.rim.N, px, py - WALL_LIFT);
             if (!isWall(x - 1, y)) D(this.rim.W, px, py - WALL_LIFT);
             if (!isWall(x + 1, y)) D(this.rim.E, px, py - WALL_LIFT);
+            if (hasSigns && signs.has(i)) D(this.plq[signs.get(i) ? 1 : 0], px + 2, py + 7);     // 벽에 붙인 나무 판
             if (mn && !mn.roof && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py - WALL_LIFT);
             continue;
           }
@@ -232,6 +255,7 @@ export class Renderer {
           if (fade) ctx.globalAlpha = 0.45;
           D(s, px + s.ox, py + s.oy);
           if (fade) ctx.globalAlpha = 1;
+          if (hasSigns && o !== O.SIGN && signs.has(i)) D(this.plq[signs.get(i) ? 1 : 0], px + 2, py + 7);   // 블록에 붙인 나무 판
           if (mn && !mn.roof && mn.x === x && mn.y === y) D(this.cracks[Math.min(3, ((mn.t / mn.total) * 4) | 0)], px, py);
         }
         if (pass === 0) {
@@ -402,8 +426,12 @@ export class Renderer {
     else if (def.wall) { y -= WALL_LIFT; h += WALL_LIFT; }
     // 설치 미리보기
     if (!c.roof && c.inReach && o === O.NONE && held && held.place && held.place.obj) {
-      const pd = OBJ[held.place.obj], s = this.objSprite(pd, held.place.meta || 0, c.x, c.y) || null;
+      const pd = OBJ[held.place.obj], s = this.objSprite(pd, held.place.meta || 0, c.x, c.y, pd.rot ? game.placeRot : 0) || null;
       if (s) { ctx.globalAlpha = 0.5; D(s, x + s.ox, y + s.oy - (pd.wall ? 0 : 0)); ctx.globalAlpha = 1; }
+    }
+    // 표지판을 들고 블록을 가리키면: 그 블록에 붙을 나무 판 미리보기
+    if (!c.roof && c.inReach && held && held.sign && canPlaque(o) && !w.signs[L].has(w.idx(c.x, c.y))) {
+      ctx.globalAlpha = 0.6; D(this.plq[0], c.x * TILE - ox + 2, c.y * TILE - oy + 7); ctx.globalAlpha = 1;
     }
     ctx.fillStyle = c.inReach ? 'rgba(255,255,255,0.9)' : 'rgba(255,90,90,0.55)';
     const pulse = c.inReach ? ((this.t * 3) | 0) % 2 : 0, a = x - pulse, b = y - pulse, ww = TILE + pulse * 2, hh = h + pulse * 2;
