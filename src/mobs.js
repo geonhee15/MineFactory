@@ -7,7 +7,8 @@ import { MOBS, MOB_KEYS, lures } from './data/mobs.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
-const TARGET = 220;                // 세계 전체의 동물 수 목표
+const TARGET = 440;                // 세계 전체의 동물 수 목표 (0.18.0까지는 220)
+export const MOB_VERSION = 2;      // 동물 수 규칙의 버전: 예전 규칙으로 저장된 세계는 불러올 때 한 번 채워 준다
 const ACTIVE = 44 * TILE;          // 플레이어에게서 이만큼 안에 있는 동물만 움직인다
 const STREAM = 34 * TILE;          // 손님에게는 이만큼 안의 동물만 알려 준다
 const HEAR = 13 * TILE;            // 울음소리가 들리는 거리
@@ -73,24 +74,27 @@ export class Mobs {
         if (w.ground(SURFACE, x, y) === G.GRASS && this.herd(x, y, k)) break;
       }
     }
-    for (let t = 0; t < 2400 && this.list.length < TARGET; t++) {
-      const x = randi(8, MAP_W - 9), y = randi(8, MAP_H - 9);
-      if (w.ground(SURFACE, x, y) !== G.GRASS) continue;
-      if ((x - s.x) ** 2 + (y - s.y) ** 2 < 36) continue;
-      this.herd(x, y, MOB_KEYS[randi(0, MOB_KEYS.length - 1)]);
-    }
+    this.fill(TARGET, [{ x: s.x * TILE, y: s.y * TILE }], 6 * TILE);
   }
-  // 많이 줄었으면 플레이어가 보지 않는 먼 풀밭에 한 무리씩 다시 나타난다
-  respawn(pts) {
-    if (this.list.length >= TARGET * 0.75) return;
+  // 풀밭 아무 데나 무리를 더해 동물 수를 limit까지 채운다. near의 지점들에서 far(px) 안쪽에는 만들지 않는다.
+  // herds = 한 번에 더할 무리 수의 한도. 돌려주는 값 = 더한 무리 수
+  fill(limit, near, far, herds = Infinity, tries = 4000) {
     const w = this.game.world;
-    for (let t = 0; t < 30; t++) {
+    let made = 0;
+    for (let t = 0; t < tries && made < herds && this.list.length < limit; t++) {
       const x = randi(8, MAP_W - 9), y = randi(8, MAP_H - 9);
       if (w.ground(SURFACE, x, y) !== G.GRASS) continue;
       const px = x * TILE, py = y * TILE;
-      if (pts.some((q) => Math.abs(q.x - px) < ACTIVE && Math.abs(q.y - py) < ACTIVE)) continue;
-      if (this.herd(x, y, MOB_KEYS[randi(0, MOB_KEYS.length - 1)])) return;
+      if (near.some((q) => Math.abs(q.x - px) < far && Math.abs(q.y - py) < far)) continue;
+      if (this.herd(x, y, MOB_KEYS[randi(0, MOB_KEYS.length - 1)])) made++;
     }
+    return made;
+  }
+  // 동물이 적던 예전 규칙으로 저장된 세계: 플레이어가 보지 않는 곳에 지금 목표만큼 채워 준다
+  topUp(px, py) { return this.fill(TARGET, [{ x: px, y: py }], ACTIVE); }
+  // 줄어들면 플레이어가 보지 않는 먼 풀밭에 무리가 다시 나타난다 (30초마다 두 무리까지)
+  respawn(pts) {
+    if (this.list.length < TARGET * 0.85) this.fill(TARGET, pts, ACTIVE, 2, 60);
   }
 
   // ── 충돌 ──
@@ -144,7 +148,7 @@ export class Mobs {
     if (this.game.net.isGuest) return this.updateGuest(dt);
     const pts = this.watchers();
     this.spawnAcc += dt;
-    if (this.spawnAcc > 45) { this.spawnAcc = 0; this.respawn(pts); }
+    if (this.spawnAcc > 30) { this.spawnAcc = 0; this.respawn(pts); }
     if (!pts.length) return;
     // 한 번에 크게 움직이면 울타리를 뚫으므로 잘게 나눠 계산한다
     const total = Math.min(1, dt), steps = Math.max(1, Math.ceil(total / 0.05)), h = total / steps;

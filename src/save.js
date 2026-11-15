@@ -9,6 +9,7 @@
 //   guest:<세계 id>      멀티플레이 손님으로 들어간 남의 세계에서의 내 가방 · 진행도
 import { SAVE_VERSION, MAP_W, MAP_H, DAY_LENGTH } from './config.js';
 import { World } from './world/world.js';
+import { MOB_VERSION } from './mobs.js';
 
 const DB = 'minefactory', STORE = 'saves';
 // 주소에 ?slot=이름 을 붙이면 다른 저장 칸을 쓴다 (테스트할 때 실제 저장을 덮어쓰지 않도록)
@@ -59,6 +60,7 @@ export function serialize(game) {
     entrances: w.entrances, spawn: w.spawn,
     drops: game.drops.map((d) => ({ id: d.id, n: d.n, x: d.x, y: d.y, layer: d.layer, age: d.age })),
     mobs: game.mobs.serialize(),        // 동물 [종류, x, y, 체력]
+    mobV: MOB_VERSION,                  // 동물 수 규칙의 버전
     signs: w.signs.map((m) => [...m]),  // 표지판 글 [idx, 글]
     oreV: w.oreV,                       // 광맥을 만든 규칙의 버전
   };

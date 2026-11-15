@@ -10,7 +10,7 @@ import { Inventory, maxStack } from './inventory.js';
 import { checkQuests } from './quests.js';
 import { saveGame, restoreWorld, saveProfile, newId } from './save.js';
 import { Net } from './net.js';
-import { Mobs } from './mobs.js';
+import { Mobs, MOB_VERSION } from './mobs.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
@@ -101,7 +101,11 @@ export class Game {
     d.inv.forEach((s, i) => { this.inv.slots[i] = s && ITEMS[s.id] ? { id: s.id, n: s.n } : null; });
     this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {}, ...d.stats };
     this.drops = (d.drops || []).filter((x) => ITEMS[x.id]).map((x) => ({ vx: 0, vy: 0, z: 0, vz: 0, t: 1, age: 0, ...x, uid: this.dropSeq++ }));
-    if (Array.isArray(d.mobs)) this.mobs.load(d.mobs); else this.mobs.populate();   // 동물이 생기기 전의 세이브에는 새로 뿌려 준다
+    if (Array.isArray(d.mobs)) {
+      this.mobs.load(d.mobs);
+      if ((d.mobV || 1) < MOB_VERSION && this.layer === SURFACE) this.mobs.topUp(this.player.x, this.player.y);   // 동물이 적던 때의 세이브: 한 번 채워 준다
+      else if ((d.mobV || 1) < MOB_VERSION) this.mobs.topUp(-1e6, -1e6);
+    } else this.mobs.populate();                                                    // 동물이 생기기 전의 세이브에는 새로 뿌려 준다
     this.pairAllChests();       // 큰 상자가 생기기 전의 세이브: 나란히 놓여 있던 상자들을 묶어 준다
     this.world.oreV = d.oreV || 1;
     enrichOres(this.world);     // 광석이 적던 때의 세이브: 아직 가 보지 않은 동굴 벽 속에 광맥을 더 넣는다
