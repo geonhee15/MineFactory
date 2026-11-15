@@ -153,7 +153,7 @@ export class Mobs {
       if (!pts.some((q) => Math.abs(q.x - m.x) < ACTIVE && Math.abs(q.y - m.y) < ACTIVE)) { m.moving = false; continue; }
       const lead = this.leader(m, pts);
       if (lead && m.state !== 'follow' && m.state !== 'flee') this.voice(m, 0.8);    // 먹이를 알아본 순간 한 번 운다
-      for (let s = 0; s < steps; s++) this.step(m, h, lead);
+      for (let s = 0; s < steps; s++) { this.step(m, h, lead); this.shove(m, pts, h); }
       m.rx = m.x; m.ry = m.y;
       this.chatter(m, total);
     }
@@ -207,6 +207,39 @@ export class Mobs {
       m.x = Math.max(8, Math.min(MAP_W * TILE - 8, m.x)); m.y = Math.max(10, Math.min(MAP_H * TILE - 6, m.y));
     }
     m.anim = m.moving ? m.anim + h * (m.state === 'flee' ? 13 : m.state === 'follow' ? 10 : 6) : 0;
+  }
+  // 동물을 밀고 가는 사람의 걸음: 가는 쪽에 맞닿은 동물이 있으면 그 동물이 떠밀리는 속도까지만 낼 수 있다.
+  // (그냥 통과해 버리지 않고 밀고 가는 느낌이 나게. 닭은 가벼워서 거의 느려지지 않고, 소는 묵직하다)
+  // px, py = 그 사람의 위치 · ux, uy = 가는 방향. 돌려주는 값 = 낼 수 있는 가장 빠른 속도(px/초)
+  resist(px, py, ux, uy) {
+    let best = Infinity;
+    for (const m of this.list) {
+      const dx = m.rx - px, dy = m.ry - py;
+      if (Math.abs(dx) > 16 || Math.abs(dy) > 12 || m.state === 'follow') continue;
+      const d = MOBS[m.k];
+      if (Math.hypot(dx, dy * 1.5) < d.hw + 6 && dx * ux + dy * uy > 0 && d.push < best) best = d.push;
+    }
+    return best;
+  }
+  // 사람과 부딪히면 그 반대쪽으로 조금씩 떠밀린다. 깊이 겹칠수록 빨리, 무거운 동물일수록 느리게.
+  // (먹이를 보고 따라온 동물은 곁에 붙어 있어야 하므로 밀지 않는다)
+  shove(m, pts, h) {
+    if (m.state === 'follow') return;
+    const d = MOBS[m.k], R = d.hw + 6;
+    for (const q of pts) {
+      let dx = m.x - q.x, dy = m.y - q.y;
+      const dist = Math.hypot(dx, dy * 1.5);              // 몸은 옆으로 길다: 위아래로는 더 가까워야 닿는다
+      if (dist >= R) continue;
+      if (dist < 0.5) { dx = m.id % 2 ? 1 : -1; dy = 0; }  // 똑같은 자리에 겹쳤으면 옆으로
+      const len = Math.hypot(dx, dy), sp = d.push * Math.min(1, 0.25 + ((R - dist) / R) * 2) * h;
+      const mx = (dx / len) * sp, my = (dy / len) * sp;
+      if (!this.blocked(m, m.x + mx, m.y)) m.x += mx;      // 울타리 · 벽 너머로는 밀리지 않는다
+      if (!this.blocked(m, m.x, m.y + my)) m.y += my;
+      m.x = Math.max(8, Math.min(MAP_W * TILE - 8, m.x)); m.y = Math.max(10, Math.min(MAP_H * TILE - 6, m.y));
+      // 떠밀리는 동안 발을 구른다
+      if (Math.abs(dx) > Math.abs(dy) * 0.4) m.dir = dx > 0 ? 'r' : 'l';
+      m.pa = (m.pa || 0) + h * 9; m.anim = m.pa; m.moving = true;
+    }
   }
   updateGuest(dt) {
     const now = performance.now(), k = Math.min(1, dt * 12);
@@ -291,7 +324,7 @@ export class Mobs {
     const a = [];
     for (const m of this.list) {
       if (Math.abs(m.x - px) > STREAM || Math.abs(m.y - py) > STREAM) continue;
-      a.push([m.id, MOB_KEYS.indexOf(m.k), Math.round(m.x), Math.round(m.y), (m.moving ? 1 : 0) | (m.dir === 'r' ? 2 : 0) | (m.state === 'flee' ? 4 : 0), m.hp, m.hc]);
+      a.push([m.id, MOB_KEYS.indexOf(m.k), Math.round(m.x), Math.round(m.y), (m.moving ? 1 : 0) | (m.dir === 'r' ? 2 : 0) | (m.state === 'flee' ? 4 : 0) | (m.state === 'follow' ? 8 : 0), m.hp, m.hc]);
       if (a.length >= 90) break;
     }
     return a;
@@ -304,7 +337,7 @@ export class Mobs {
       let m = this.byId.get(id);
       if (!m) { m = this.add(k, x, y, hp, id); m.hc = hc; }
       else if (hc !== m.hc) { m.hc = hc; if (now - m.mine > 700) this.hitFx(m); else m.hurt = 0.22; }
-      m.x = x; m.y = y; m.hp = hp; m.moving = !!(fl & 1); m.dir = fl & 2 ? 'r' : 'l'; m.state = fl & 4 ? 'flee' : m.moving ? 'walk' : 'idle';
+      m.x = x; m.y = y; m.hp = hp; m.moving = !!(fl & 1); m.dir = fl & 2 ? 'r' : 'l'; m.state = fl & 4 ? 'flee' : fl & 8 ? 'follow' : m.moving ? 'walk' : 'idle';
       m.seenAt = now;
     }
   }

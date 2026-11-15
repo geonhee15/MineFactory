@@ -1,6 +1,6 @@
 {
   "name": "minefactory",
-  "version": "0.16.0",
+  "version": "0.18.0",
   "description": "마인 팩토리 — 캐고, 만들고, 자동화해서 화성까지 가는 2D 도트 샌드박스 게임",
   "type": "module",
   "private": true,

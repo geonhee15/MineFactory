@@ -224,7 +224,10 @@ export class Game {
       // 다진 길 위에서는 조금 더 빨리 걷는다
       const fast = GROUND[this.world.ground(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))].speed || 1;
       const crawl = p.hunger <= 0;                                // 그로기: 기어가듯 느리다
-      const len = Math.hypot(mx, my), sp = (crawl ? CRAWL_SPEED : 72) * fast * dt;
+      const len = Math.hypot(mx, my);
+      // 동물을 밀고 갈 때는 그 동물이 떠밀리는 속도보다 빨리 갈 수 없다
+      const top = this.layer === SURFACE ? this.mobs.resist(p.x, p.y, mx / len, my / len) : Infinity;
+      const sp = Math.min((crawl ? CRAWL_SPEED : 72) * fast, top) * dt;
       const dx = (mx / len) * sp, dy = (my / len) * sp;
       if (this.collides(p.x, p.y)) { p.x += dx; p.y += dy; }   // 끼었을 때는 빠져나올 수 있게
       else {
@@ -242,6 +245,12 @@ export class Game {
         this.audio.play('step_' + (g.step || 'grass'));
       }
     } else { p.anim = 0; p.stepT = 0.08; }
+    // 컨베이어 벨트 위에 서 있으면 벨트가 흐르는 쪽으로 실려 간다 (가만히 있어도, 창을 열어 두어도)
+    if (!this.fade && this.world.obj(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE)) === O.BELT) {
+      const [bx, by] = ROT_DIR[this.world.rot(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))], st = BELT_SPEED * dt;
+      if (bx && !this.collides(p.x + bx * st, p.y)) p.x += bx * st;
+      if (by && !this.collides(p.x, p.y + by * st)) p.y += by * st;
+    }
     if (p.swing > 0) p.swing -= dt;
   }
   faceTo(t) {
