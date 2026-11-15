@@ -600,6 +600,133 @@ function bed() {
   p.outline(K);
   return p;
 }
+// 양모 침대: 복슬복슬한 크림색 양털 이불과 하늘색 띠
+function woolBed() {
+  const p = new Pix(16, 30), g = PAL.plank, r = mulberry32(4411);
+  p.ellipse(8, 28.5, 7.5, 1.5, 0x000000, 55);
+  p.rect(1, 2, 14, 4, g.d); p.rect(1, 2, 14, 1, g.l);                 // 머리판
+  p.rect(1, 6, 14, 20, 0xf2efe6);                                     // 매트리스
+  p.rect(3, 7, 10, 5, 0xffffff); p.rect(3, 11, 10, 1, 0xd8d4c8);       // 베개
+  p.rect(1, 13, 14, 13, 0xf3ead2);                                    // 양털 이불
+  p.rect(1, 13, 14, 2, 0x7fb2de); p.rect(1, 13, 14, 1, 0xa9d0f0);      // 접힌 띠
+  for (let y = 16; y < 26; y += 2) for (let x = 1 + ((y >> 1) & 1); x < 15; x += 3) {   // 털 뭉치
+    p.set(x, y, 0xffffff); p.set(x + 1, y, 0xffffff); p.set(x + 1, y + 1, 0xd9cba6);
+    if (r() < 0.4) p.set(x, y + 1, 0xe6dabb);
+  }
+  p.rect(1, 26, 14, 3, g.b); p.rect(1, 26, 14, 1, g.l); p.rect(1, 28, 14, 1, g.dd);
+  p.outline(K);
+  return p;
+}
+// 울타리. mask: 1 북 · 2 동 · 4 남 · 8 서 쪽 이웃과 이어짐
+function fence(mask) {
+  const p = new Pix(16, 18), g = PAL.plank;
+  const rail = (x0, x1) => { for (const y of [6, 11]) for (let x = x0; x <= x1; x++) { p.set(x, y, g.l); p.set(x, y + 1, g.d); } };
+  if (mask & 8) rail(0, 6);
+  if (mask & 2) rail(9, 15);
+  if (mask & 1) { p.rect(7, 0, 1, 2, g.b); p.rect(8, 0, 1, 2, g.d); }
+  if (mask & 4) { p.rect(7, 16, 1, 2, g.b); p.rect(8, 16, 1, 2, g.d); }
+  p.rect(6, 2, 4, 14, g.b); p.rect(6, 2, 1, 14, g.l); p.rect(9, 2, 1, 14, g.d);   // 기둥
+  p.rect(6, 2, 4, 1, g.hi); p.rect(6, 15, 4, 1, g.dd);
+  p.outline(K);
+  const out = new Pix(16, 18);
+  out.ellipse(8, 16, 4.5, 1.4, 0x000000, 50);
+  return out.blit(p);
+}
+// 울타리 문. vertical: 울타리가 위아래로 이어진 자리, open: 열림
+function fenceGate(vertical, open) {
+  const p = new Pix(16, 18), g = PAL.plank, iron = 0x8a8f99;
+  const post = (x, y, h) => { p.rect(x, y, 3, h, g.b); p.rect(x, y, 1, h, g.l); p.rect(x + 2, y, 1, h, g.d); p.rect(x, y, 3, 1, g.hi); p.rect(x, y + h - 1, 3, 1, g.dd); };
+  if (!vertical) {
+    if (!open) {
+      for (const y of [5, 11]) { p.rect(3, y, 10, 1, g.hi); p.rect(3, y + 1, 10, 1, g.b); }    // 가로대
+      for (const x of [5, 10]) p.rect(x, 4, 1, 10, g.l);                                        // 세로 살
+      p.line(6, 10, 9, 7, g.d);
+      p.rect(7, 8, 2, 2, iron); p.set(7, 8, 0xb9bec8);                                          // 걸쇠
+    } else {
+      for (const x of [3, 12]) { p.rect(x, 6, 1, 11, g.hi); p.set(x, 16, g.dd); }               // 기둥에 붙여 활짝 젖힌 문짝
+    }
+    post(0, 2, 14); post(13, 2, 14);                         // 양옆 기둥은 이웃 울타리의 가로대와 맞닿는다
+  } else if (!open) {
+    p.rect(7, 4, 2, 11, g.hi); p.rect(8, 4, 1, 11, g.b);                // 옆에서 본 문짝
+    p.rect(7, 9, 2, 2, iron);
+    post(6, 0, 5); post(6, 13, 5);
+  } else {
+    for (const y of [3, 7]) { p.rect(9, y, 6, 1, g.hi); p.rect(9, y + 1, 6, 1, g.b); }          // 동쪽으로 젖힌 문짝
+    p.rect(11, 2, 1, 8, g.l); p.rect(14, 2, 1, 8, g.l);
+    post(6, 0, 5); post(6, 13, 5);
+  }
+  p.outline(K);
+  const out = new Pix(16, 18);
+  if (!vertical) { out.ellipse(1.5, 16.4, 2.5, 1.2, 0x000000, 50); out.ellipse(14.5, 16.4, 2.5, 1.2, 0x000000, 50); }
+  else out.ellipse(8, 17, 3.5, 1, 0x000000, 50);
+  return out.blit(p);
+}
+
+// ── 동물 ── 옆모습(오른쪽을 본다). f: 0 서 있기 · 1, 2 걷기
+// 걷는 프레임에서는 다리를 번갈아 한 칸씩 내밀고, 내민 다리는 살짝 든다
+function mobLegs(p, xs, y, h, col, hoof, f) {
+  xs.forEach((x, i) => {
+    const ph = f === 0 ? 0 : (i % 2 === 0) === (f === 1) ? 1 : -1, lift = ph === 1 ? 1 : 0;
+    p.rect(x + ph, y, 2, h - lift, col);
+    p.rect(x + ph, y + h - lift - 1, 2, 1, hoof);
+  });
+}
+const belly = (p, y0, from, to) => { for (let y = y0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (p.get(x, y) === from) p.set(x, y, to); };
+function cow(f) {
+  const p = new Pix(22, 17), w = 0xf4f1e8, ws = 0xd2ccbd, b = 0x2f2a35, pk = 0xf0a6a0, horn = 0xe8dcc0;
+  mobLegs(p, [4, 7, 13, 16], 11, 5, ws, 0x3a3340, f);
+  p.ellipse(9.5, 8, 8, 4.3, w);                              // 몸통
+  belly(p, 11, w, ws);
+  p.ellipse(6, 7, 2.6, 2, b); p.ellipse(12.5, 9, 2, 1.7, b); p.rect(9, 4, 2, 1, b);   // 얼룩
+  p.rect(10, 12, 2, 1, pk);                                  // 젖
+  p.line(1, 6, 0, 10, ws); p.set(0, 11, b);                  // 꼬리
+  p.ellipse(18, 6.5, 2.8, 3.2, w);                           // 머리
+  p.rect(19, 7, 2, 3, pk); p.set(20, 8, 0xc97f7c);           // 주둥이
+  p.set(18, 5, b);                                           // 눈
+  p.rect(15, 3, 2, 2, b);                                    // 귀
+  p.set(17, 2, horn); p.set(19, 2, horn);                    // 뿔
+  return p.outline(K);
+}
+function pig(f) {
+  const p = new Pix(18, 13), c = 0xf2a3ab, cs = 0xd9808e, cl = 0xffc4c8, hoof = 0x7a3f4c;
+  mobLegs(p, [3, 6, 10, 13], 9, 3, cs, hoof, f);
+  p.ellipse(8, 6, 7, 3.9, c);                                // 몸통
+  belly(p, 9, c, cs);
+  p.rect(15, 5, 2, 3, cl); p.set(16, 6, hoof);               // 코
+  p.set(13, 4, 0x2f2a35);                                    // 눈
+  p.rect(11, 1, 2, 2, cs); p.set(12, 2, c);                  // 귀
+  p.set(0, 5, cs); p.set(0, 4, cs); p.set(1, 3, cs);         // 말린 꼬리
+  p.set(5, 4, cl); p.set(6, 3, cl); p.set(7, 3, cl);         // 등의 윤기
+  return p.outline(K);
+}
+function sheep(f) {
+  const p = new Pix(20, 15), w = 0xf6f2e6, ws = 0xd6cfbd, face = 0x574a55, faceL = 0x736370;
+  mobLegs(p, [4, 7, 10, 13], 10, 4, face, 0x2f2a35, f);
+  p.ellipse(8.5, 6.5, 6.5, 4.2, w);                          // 복슬복슬한 몸
+  for (const [x, y] of [[3.5, 3.5], [6, 2.5], [9, 2.2], [12, 3], [2.5, 6.5], [14.5, 6.5], [4.5, 10], [8.5, 10.4], [12.5, 10]]) p.disc(x, y, 1.6, w);
+  for (const [x, y] of [[5, 5], [9, 4], [7, 8], [11, 7], [4, 8], [12, 4]]) { p.set(x, y, ws); p.set(x + 1, y + 1, ws); }   // 털 그늘
+  belly(p, 10, w, ws);
+  p.ellipse(16.5, 7, 2, 2.6, face);                          // 얼굴
+  p.set(17, 6, 0xf6f2e6);                                    // 눈
+  p.rect(14, 5, 2, 1, faceL);                                // 귀
+  p.disc(15, 3.6, 1.5, w);                                   // 머리 위 털
+  return p.outline(K);
+}
+function chicken(f) {
+  const p = new Pix(13, 12), w = 0xfbf8f0, ws = 0xd9d3c2, red = 0xe2504a, or = 0xf0a030;
+  const lx = f === 1 ? [4, 7] : f === 2 ? [5, 6] : [4, 6];
+  for (const x of lx) { p.set(x, 9, or); p.set(x, 10, or); p.set(x + 1, 10, or); }   // 다리
+  p.ellipse(4.5, 6.5, 3.6, 2.8, w);                          // 몸
+  p.rect(1, 3, 2, 3, w); p.set(0, 3, ws); p.set(1, 2, w);    // 꼬리 깃
+  p.rect(3, 7, 3, 1, ws); p.set(4, 8, ws);                   // 날개
+  p.disc(8.2, 3.6, 1.9, w);                                  // 머리
+  p.rect(7, 1, 2, 1, red); p.set(8, 0, red);                 // 볏
+  p.set(11, 4, or);                                          // 부리
+  p.set(9, 6, red);                                          // 턱볏
+  p.set(9, 3, 0x2f2a35);                                     // 눈
+  return p.outline(K);
+}
+
 function sapling(kind) {
   const p = new Pix(16, 16);
   const leaf = [PAL.oak, PAL.pine, PAL.birchLeaf, PAL.apple][kind];
@@ -776,6 +903,16 @@ export function buildSprites() {
   for (let f = 0; f < 3; f++) anchored(`o_torch_0_${f}`, torch(f));
   anchored('o_door_0', door(false)); anchored('o_door_1', door(true));
   anchored('o_bed_0', bed());
+  anchored('o_woolbed_0', woolBed());
+  for (let m = 0; m < 16; m++) anchored(`o_fence_${m}`, fence(m));       // 이웃과 이어지는 16가지 모양
+  for (const [v, n] of [[0, 'h'], [1, 'v']]) for (let o = 0; o < 2; o++) anchored(`o_gate_${n}_${o}`, fenceGate(!!v, !!o));
+  // 동물: 오른쪽·왼쪽, 서기·걷기 2프레임, 맞았을 때의 붉은 그림(…h)
+  for (const [k, fn] of [['cow', cow], ['pig', pig], ['sheep', sheep], ['chicken', chicken]]) for (let f = 0; f < 3; f++) {
+    const p = fn(f), ox = -Math.round(p.w / 2), oy = -(p.h - 1);
+    const hurt = p.clone().map((c) => (c === K ? 0x5a1420 : mix(c, 0xff5a4a, 0.55)));
+    A(`mob_${k}_r_${f}`, p, ox, oy); A(`mob_${k}_l_${f}`, p.flip(), ox, oy);
+    A(`mob_${k}_rh_${f}`, hurt, ox, oy); A(`mob_${k}_lh_${f}`, hurt.flip(), ox, oy);
+  }
   for (let k = 0; k < 4; k++) {
     A(`o_sapling_${k}`, sapling(k));
     anchored(`o_wheat_${k}`, wheat(k));

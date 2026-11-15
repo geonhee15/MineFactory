@@ -8,13 +8,14 @@
 //  · 드롭 아이템 : 방장이 만들고(d+), 줍는 것도 방장이 한 명에게만 허락한다(dq → d-)
 //  · 상자·화로  : 한 번에 한 사람만 열 수 있다. 연 사람이 내용을 책임지고 방장에게 돌려준다 (eo/eg/eu/ec)
 //  · 성장·시간   : 방장만 계산해서 결과를 보낸다
+//  · 동물        : 방장만 움직인다. 손님에게는 가까운 동물들의 위치를 보내고(ms), 손님이 때리면 방장이 처리한다(mh → md)
 import { MAP_W, MAP_H, TILE } from './config.js';
 import { O, OBJ } from './data/objects.js';
-import { ITEMS } from './data/items.js';
+import { ITEMS, attackDamage } from './data/items.js';
 import { pack, unpack, gzip, gunzip, b64enc, b64dec, restoreWorld, loadProfile } from './save.js';
 
 const N = MAP_W * MAP_H;
-const PROTO = 2;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
+const PROTO = 3;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
 const PREFIX = 'mf1-';
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
 export const MAX_PLAYERS = 8;
@@ -118,7 +119,7 @@ export class Net {
     this.owned = null;            // 손님: 열어 둔 상자/화로 { l, i, ent, sent }
     this.pendingEnt = null;
     this.joining = null; this.ready = false; this.queue = [];
-    this.sendAcc = 0; this.timeAcc = 0; this.entAcc = 0; this.swingN = 0; this.lastSwing = 0; this.lastP = ''; this.lastPAt = 0;
+    this.sendAcc = 0; this.timeAcc = 0; this.entAcc = 0; this.mobAcc = 0; this.swingN = 0; this.lastSwing = 0; this.lastP = ''; this.lastPAt = 0;
     this.local = new URLSearchParams(location.search).get('net') === 'local';
     this.bgAt = performance.now();
     setInterval(() => this.flush(), 60);
@@ -299,6 +300,14 @@ export class Net {
         }
         break;
       }
+      case 'mh': {
+        // 손님이 동물을 때렸다: 가까이 있을 때만, 너무 빠르지 않게, 그 손님이 든 물건의 공격력으로
+        const mob = g.mobs.byId.get(m.id), now = performance.now();
+        if (!mob || pl.layer !== 0 || now - (pl.atkAt || 0) < 250 || Math.hypot(mob.x - pl.x, mob.y - pl.y) > 5 * TILE) break;
+        pl.atkAt = now;
+        g.mobs.damage(mob, attackDamage(pl.held), pl.x, pl.y);
+        break;
+      }
       case 'chat': this.chatOut(pl.name, pl.color, String(m.text || '').slice(0, 120)); break;
     }
   }
@@ -427,6 +436,8 @@ export class Net {
       }
       case 'ex': this.pendingEnt = null; g.ui.toast(m.why === 'busy' ? '다른 플레이어가 쓰고 있어요' : '지금은 열 수 없어요'); g.audio.play('deny'); break;
       case 'tm': if (Math.abs(g.time - m.time) > 0.5) g.time = m.time; break;
+      case 'ms': if (Array.isArray(m.a)) g.mobs.netApply(m.a); break;
+      case 'md': g.mobs.netDied(m); break;
       case 'chat': g.ui.chatLine(m.name, m.color, m.text); break;
       case 'bye': this.hostLost(); break;
     }
@@ -475,7 +486,19 @@ export class Net {
     this.sendAcc += dt;
     if (this.sendAcc >= 0.08) { this.sendAcc = 0; this.sendState(); }
     if (this.isGuest) { this.entAcc += dt; if (this.entAcc > 0.25) { this.entAcc = 0; this.syncEnt(); } }
-    else { this.timeAcc += dt; if (this.timeAcc > 3) { this.timeAcc = 0; this.all({ t: 'tm', time: this.game.time }); } }
+    else {
+      this.timeAcc += dt; if (this.timeAcc > 3) { this.timeAcc = 0; this.all({ t: 'tm', time: this.game.time }); }
+      this.mobAcc += dt; if (this.mobAcc >= 0.12) { this.mobAcc = 0; this.sendMobs(); }
+    }
+  }
+  // 방장: 지상에 있는 손님마다 그 근처의 동물들을 알려 준다
+  sendMobs() {
+    const mobs = this.game.mobs;
+    for (const q of this.players.values()) {
+      if (q.layer !== 0) continue;
+      const a = mobs.netState(q.x, q.y);
+      if (a.length) this.to(q.id, { t: 'ms', a });
+    }
   }
   sendState() {
     const g = this.game, p = g.player, h = g.heldSlot();
@@ -492,13 +515,14 @@ export class Net {
       for (const id of this.players.keys()) this.to(id, { t: 'ps', a: rows.filter((r) => r[0] !== id) });
     }
   }
-  // 방장이 다른 탭을 보고 있어 화면이 멈춰도, 세계(시간·성장·화로)와 중계는 계속 돌린다
+  // 방장이 다른 탭을 보고 있어 화면이 멈춰도, 세계(시간·성장·화로·동물)와 중계는 계속 돌린다
   background() {
     const now = performance.now(), dt = Math.min(5, (now - this.bgAt) / 1000);
     this.bgAt = now;
     if (!document.hidden || this.role !== 'host' || this.game.state !== 'play') return;
     this.game.simulate(dt);
     this.sendState();
+    this.sendMobs();
     this.all({ t: 'tm', time: this.game.time });
   }
 }

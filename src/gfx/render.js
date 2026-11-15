@@ -1,7 +1,8 @@
 // 월드 렌더러: 지형 → (행 단위 y정렬) 오브젝트·플레이어 → 조명 → 커서
-import { TILE, MAP_W, MAP_H, CAVE, WALL_LIFT, ROOF_LIFT, PLAYER_COLORS } from '../config.js';
+import { TILE, MAP_W, MAP_H, SURFACE, CAVE, WALL_LIFT, ROOF_LIFT, PLAYER_COLORS } from '../config.js';
 import { GROUND } from '../data/ground.js';
-import { OBJ, O } from '../data/objects.js';
+import { OBJ, O, joins } from '../data/objects.js';
+import { MOBS, MOB_KEYS } from '../data/mobs.js';
 import { ITEMS } from '../data/items.js';
 import { hash2, clamp } from '../rng.js';
 import { hex } from './pix.js';
@@ -17,6 +18,7 @@ export class Renderer {
     this.cam = { x: 0, y: 0 };
     this.ox = 0; this.oy = 0;
     this.t = 0; this.frame = 0;
+    this.world = null; this.layerNo = 0;      // 지금 그리고 있는 세계와 층 (이웃에 따라 모양이 바뀌는 그림용)
     this.light = document.createElement('canvas');
     this.lctx = this.light.getContext('2d');
     this.css = new Map();
@@ -52,7 +54,9 @@ export class Renderer {
     for (const d of OBJ) {
       if (!d || !d.spr) continue;
       const b = { late: (d.solid || d.tall) && !d.wall };
-      if (d.frames && d.byMeta) {
+      if (d.connect) { b.conn = []; for (let m = 0; m < 16; m++) b.conn.push(get(`${d.spr}_${m}`)); }
+      else if (d.gate) b.gate = ['h', 'v'].map((n) => [get(`${d.spr}_${n}_0`), get(`${d.spr}_${n}_1`)]);
+      else if (d.frames && d.byMeta) {
         b.mf = [];
         for (let m = 0; m < d.byMeta; m++) { const fr = []; for (let f = 0; f < d.frames; f++) fr.push(get(`${d.spr}_${m}_${f}`)); b.mf.push(fr); }
       }
@@ -74,6 +78,8 @@ export class Renderer {
       return set;
     });
     this.shadowP = get('shadow_p'); this.shadowD = get('shadow_s');
+    this.ms = {};                // 동물: 종류 → { r, l, rh, lh } 각각 [서기, 걷기1, 걷기2]
+    for (const k of MOB_KEYS) { const set = (this.ms[k] = {}); for (const d of ['r', 'l', 'rh', 'lh']) set[d] = [0, 1, 2].map((f) => get(`mob_${k}_${d}_${f}`)); }
     this.icons = {};
     for (const id in ITEMS) this.icons[id] = get(ITEMS[id].icon);
   }
@@ -109,6 +115,13 @@ export class Renderer {
   objSprite(def, meta, x, y) {
     const b = this.os[def.id];
     if (!b) return null;
+    if (b.conn || b.gate) {
+      // 울타리 · 울타리 문: 상하좌우 이웃을 보고 이어진 모양을 고른다
+      const w = this.world, L = this.layerNo, j = (dx, dy) => (w && joins(w.obj(L, x + dx, y + dy)) ? 1 : 0);
+      const n = j(0, -1), e = j(1, 0), s = j(0, 1), we = j(-1, 0);
+      if (b.conn) return b.conn[n | (e << 1) | (s << 2) | (we << 3)];
+      return b.gate[(n || s) && !(e || we) ? 1 : 0][meta ? 1 : 0];
+    }
     if (b.mf) return b.mf[Math.min(meta, b.mf.length - 1)][((this.t * 5 + x * 3 + y) | 0) % b.mf[0].length];
     if (b.anim) return b.anim[((this.t * 8 + x * 3 + y) | 0) % b.anim.length];
     if (b.metas) {
@@ -121,6 +134,7 @@ export class Renderer {
 
   render(game, dt) {
     this.t += dt; this.frame++;
+    this.world = game.world; this.layerNo = game.layer;
     const ctx = this.ctx, img = this.img, w = game.world, vw = this.vw, vh = this.vh;
     if (!w) { ctx.fillStyle = '#0b0910'; ctx.fillRect(0, 0, vw, vh); return; }
     const L = game.layer, Lr = w.layers[L], ground = Lr.ground, objs = Lr.obj, metas = Lr.meta;
@@ -177,6 +191,10 @@ export class Renderer {
     if (!title) for (const rp of game.net.players.values()) {
       if (rp.layer !== L || rp.rx < ox - 24 || rp.rx > ox + vw + 24 || rp.ry < oy - 8 || rp.ry > oy + vh + 32) continue;
       ents.push({ y: rp.ry, rp });
+    }
+    if (L === SURFACE) for (const m of game.mobs.list) {
+      if (m.rx < ox - 24 || m.rx > ox + vw + 24 || m.ry < oy - 8 || m.ry > oy + vh + 32) continue;
+      ents.push({ y: m.ry, m });
     }
     ents.sort((a, b) => a.y - b.y);
     let ei = 0;
@@ -273,6 +291,14 @@ export class Renderer {
       ctx.drawImage(this.img, s.x, s.y, s.w, s.h, x - 6, y - 11 - Math.round(d.z) + bob, 12, 12);
       return;
     }
+    if (e.m) {        // 동물
+      const m = e.m, x = Math.round(m.rx) - ox, y = Math.round(m.ry) - oy, d = MOBS[m.k];
+      const s = this.ms[m.k][m.dir + (m.hurt > 0 ? 'h' : '')][m.moving ? 1 + ((m.anim | 0) & 1) : 0];
+      const sh = d.w > 14 ? this.shadowP : this.shadowD, sw = d.w - 4;
+      ctx.drawImage(this.img, sh.x, sh.y, sh.w, sh.h, x - (sw >> 1), y - 3, sw, sh.h);
+      D(s, x + s.ox, y + s.oy);
+      return;
+    }
     if (e.rp) {       // 다른 플레이어
       const r = e.rp, px = Math.round(r.rx) - ox, py = Math.round(r.ry) - oy;
       const set = this.pl[r.color % this.pl.length], s = (set[r.dir] || set.d)[r.moving ? (r.anim | 0) % 4 : 0];
@@ -357,6 +383,15 @@ export class Renderer {
 
   drawCursor(game, D, ox, oy) {
     const ctx = this.ctx, c = game.cursor, w = game.world, L = game.layer;
+    if (game.mobT) {
+      const m = game.mobT.m, d = MOBS[m.k], near = game.mobT.inReach;
+      const pulse = near ? ((this.t * 3) | 0) % 2 : 0;
+      const a = Math.round(m.rx - d.w / 2) - ox - 1 - pulse, b = Math.round(m.ry) - d.h - oy - pulse, ww = d.w + 2 + pulse * 2, hh = d.h + 2 + pulse * 2;
+      ctx.fillStyle = near ? 'rgba(255,255,255,0.9)' : 'rgba(255,90,90,0.55)';
+      const br = (bx, by, sx, sy) => { ctx.fillRect(bx, by, 4 * sx, 1 * sy); ctx.fillRect(bx, by, 1 * sx, 4 * sy); };
+      br(a, b, 1, 1); br(a + ww, b, -1, 1); br(a, b + hh, 1, -1); br(a + ww, b + hh, -1, -1);
+      return;
+    }
     if (!c || !w.inb(c.x, c.y)) return;
     const o = w.obj(L, c.x, c.y), def = OBJ[o], held = game.heldDef();
     let x = c.x * TILE - ox, y = c.y * TILE - oy, h = TILE;

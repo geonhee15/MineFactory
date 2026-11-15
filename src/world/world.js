@@ -98,7 +98,7 @@ export class World {
     if (!GROUND[L.ground[i]].walk) return true;
     const o = L.obj[i];
     if (o === O.NONE) return false;
-    if (o === O.DOOR) return L.meta[i] === 0;
+    if (o === O.DOOR || o === O.GATE) return L.meta[i] === 0;   // 문 · 울타리 문은 닫혀 있을 때만 막는다
     return OBJ[o].solid;
   }
   isWallAt(l, x, y) {

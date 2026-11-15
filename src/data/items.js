@@ -25,6 +25,16 @@ item('crystal', '수정', '은은하게 빛나는 결정. 언젠가 쓸모가 �
 item('gear', '톱니바퀴', '기계의 기본 부품. 공장 시대의 첫걸음!');
 item('copper_wire', '구리선', '전기를 나르는 선. 공장 설비에 쓰인다.');
 
+// ── 동물에게서 얻는 것 ── (지금은 양털만 쓸 곳이 있다. 고기는 아직 먹을 수 없다)
+item('beef', '소고기', '소에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
+item('pork', '돼지고기', '돼지에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
+item('mutton', '양고기', '양에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
+item('chicken', '닭고기', '닭에게서 얻은 고기. 아직은 먹는 방법을 모른다.');
+item('leather', '가죽', '질기고 튼튼한 소가죽. 언젠가 쓸모가 있을 것 같다.');
+item('wool', '양털', '폭신한 양털. 양모 침대의 재료.');
+item('feather', '깃털', '가벼운 닭 깃털. 언젠가 쓸모가 있을 것 같다.');
+item('egg', '달걀', '닭에게서 얻은 달걀. 언젠가 쓸모가 있을 것 같다.');
+
 // ── 먹을 것 ──
 item('berry', '산딸기', '새콤달콤한 열매.', { food: 8 });
 item('apple', '사과', '아삭한 사과.', { food: 14 });
@@ -58,6 +68,9 @@ item('stone_brick', '돌 벽돌', '단단한 건축용 벽.', { place: { obj: O.
 item('plank_floor', '나무 바닥', '바닥에 깐다.', { place: { ground: G.PLANK } });
 item('door', '문', '우클릭으로 여닫는다.', { place: { obj: O.DOOR } });
 item('bed', '침대', '밤에 우클릭하면 아침까지 잔다.', { place: { obj: O.BED } });
+item('wool_bed', '양모 침대', '자고 일어나면 포만감이 가득 찬다. 낮에 우클릭하면 저녁까지 낮잠을 잔다.', { place: { obj: O.WOOL_BED } });
+item('fence', '울타리', '사람도 동물도 넘지 못하는 낮은 담. 나란히 놓으면 서로 이어진다.', { place: { obj: O.FENCE } });
+item('fence_gate', '울타리 문', '우클릭으로 여닫는다. 동물은 열지 못한다.', { place: { obj: O.GATE } });
 item('roof', '지붕', '벽과 방 위를 덮는 천장. 밖에서는 안이 보이지 않고, 문을 열거나 안에 들어가면 비쳐 보인다.', { roof: true });
 item('flag', '깃발', '세우고 색을 고르면 지도에 깃발로 표시된다. 멀리서도 화살표로 방향을 알려 준다.', { place: { obj: O.FLAG } });
 
@@ -67,10 +80,15 @@ for (const [mat, ko, tier] of TIERS) {
   item(`${mat}_pickaxe`, `${ko} 곡괭이`, '돌과 광석을 캔다.', { stack: 1, tool: 'pick', tier });
   item(`${mat}_axe`, `${ko} 도끼`, '나무를 빠르게 벤다.', { stack: 1, tool: 'axe', tier });
   item(`${mat}_hoe`, `${ko} 괭이`, '풀밭이나 흙을 갈아 경작지로 만든다.', { stack: 1, tool: 'hoe', tier });
+  item(`${mat}_sword`, `${ko} 검`, '동물을 사냥하는 무기. 맨손이나 다른 도구보다 훨씬 세다.', { stack: 1, tool: 'sword', tier });
   item(`${mat}_shovel`, `${ko} 삽`, '땅을 다져 길로 만든다. 누른 채 끌면 이어서 다져지고, 길을 누르면 다시 흙으로 돌아간다.', { stack: 1, tool: 'shovel', tier });
 }
 // 삽 등급별 한 칸 다지는 간격(초)
 export const SHOVEL_COOL = [0.3, 0.26, 0.18, 0.11];
+
+// 검 등급별 공격력. 다른 도구로 때리면 2, 맨손이나 그 밖의 물건으로는 1
+export const SWORD_DMG = [1, 4, 5, 7];
+export const attackDamage = (id) => { const it = ITEMS[id]; return it && it.tool === 'sword' ? SWORD_DMG[it.tier] : it && it.tool ? 2 : 1; };
 
 // 도구 등급별 채굴 속도 배수 (0 = 맨손)
 export const TOOL_SPEED = [1, 2.6, 4.2, 6.8];
@@ -89,14 +107,17 @@ R('wood_pickaxe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
 R('wood_axe', 1, { plank: 3, stick: 2 }, 'workbench', 'tool');
 R('wood_hoe', 1, { plank: 2, stick: 2 }, 'workbench', 'tool');
 R('wood_shovel', 1, { plank: 1, stick: 2 }, 'workbench', 'tool');
+R('wood_sword', 1, { plank: 2, stick: 1 }, 'workbench', 'tool');
 R('stone_pickaxe', 1, { stone: 3, stick: 2 }, 'workbench', 'tool');
 R('stone_axe', 1, { stone: 3, stick: 2 }, 'workbench', 'tool');
 R('stone_hoe', 1, { stone: 2, stick: 2 }, 'workbench', 'tool');
 R('stone_shovel', 1, { stone: 1, stick: 2 }, 'workbench', 'tool');
+R('stone_sword', 1, { stone: 2, stick: 1 }, 'workbench', 'tool');
 R('iron_pickaxe', 1, { iron_ingot: 3, stick: 2 }, 'workbench', 'tool');
 R('iron_axe', 1, { iron_ingot: 3, stick: 2 }, 'workbench', 'tool');
 R('iron_hoe', 1, { iron_ingot: 2, stick: 2 }, 'workbench', 'tool');
 R('iron_shovel', 1, { iron_ingot: 1, stick: 2 }, 'workbench', 'tool');
+R('iron_sword', 1, { iron_ingot: 2, stick: 1 }, 'workbench', 'tool');
 
 R('furnace', 1, { stone: 8 }, 'workbench', 'build');
 R('chest', 1, { plank: 8 }, 'workbench', 'build');
@@ -106,6 +127,9 @@ R('stone_brick', 2, { stone: 2 }, 'workbench', 'build');
 R('door', 1, { plank: 6 }, 'workbench', 'build');
 R('roof', 4, { plank: 2 }, 'workbench', 'build');
 R('bed', 1, { plank: 6, fiber: 8 }, 'workbench', 'build');
+R('wool_bed', 1, { plank: 6, wool: 3 }, 'workbench', 'build');
+R('fence', 4, { plank: 2, stick: 4 }, 'workbench', 'build');
+R('fence_gate', 1, { plank: 2, stick: 2 }, 'workbench', 'build');
 
 R('bread', 1, { wheat: 3 }, 'workbench', 'food');
 R('gear', 1, { iron_ingot: 2 }, 'workbench', 'part');

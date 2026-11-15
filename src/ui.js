@@ -3,7 +3,8 @@ import { MAP_W, MAP_H, TILE, CAVE, HOTBAR, PLAYER_COLORS, DAY_LENGTH, VERSION } 
 import { GROUND } from './data/ground.js';
 import { O, OBJ, FLAG_COLORS, SAPLING_ITEMS } from './data/objects.js';
 import { hex } from './gfx/pix.js';
-import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES } from './data/items.js';
+import { ITEMS, RECIPES, SMELT, CATEGORY_NAMES, SWORD_DMG } from './data/items.js';
+import { MOBS } from './data/mobs.js';
 import { maxStack } from './inventory.js';
 import { QUESTS } from './quests.js';
 import { loadSave, listBackups, loadBackup, exportBlob, importFile, fileName, storageInfo, serialize } from './save.js';
@@ -114,8 +115,8 @@ export class UI {
           <div class="title-bar"><h2>조작법</h2><button class="x" data-act="help">✕</button></div>
           <div class="keys">
             <kbd>W A S D / 방향키</kbd><span>이동</span>
-            <kbd>좌클릭 (길게)</kbd><span>캐기 · 베기 / 들고 있는 것 놓기 · 심기 · 갈기 · 다지기</span>
-            <kbd>우클릭</kbd><span>사용하기 (제작대·화로·상자·동굴·열매 따기) / 먹기</span>
+            <kbd>좌클릭 (길게)</kbd><span>캐기 · 베기 · 동물 때리기 / 들고 있는 것 놓기 · 심기 · 갈기 · 다지기</span>
+            <kbd>우클릭</kbd><span>사용하기 (제작대·화로·상자·문·침대·동굴·열매 따기) / 먹기</span>
             <kbd>1 ~ 9 · 마우스 휠</kbd><span>단축바 선택</span>
             <kbd>E · Tab</kbd><span>가방과 제작 창</span>
             <kbd>M</kbd><span>지도</span>
@@ -124,7 +125,7 @@ export class UI {
             <kbd>- · =</kbd><span>화면 확대 / 축소</span>
             <kbd>Esc</kbd><span>창 닫기 · 일시정지</span>
           </div>
-          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.<br><b>삽</b>을 들고 땅을 누른 채 끌면 길이 다져져요. 길은 지도에도 보입니다.<br>마우스로 가리킨 것의 이름은 화면 <b>오른쪽 아래</b>에 나옵니다.</div>
+          <div class="note">가방 창에서는 <b>Shift+클릭</b>으로 빠르게 옮기고, <b>우클릭</b>으로 절반만 집거나 하나씩 놓을 수 있어요.<br>도구는 종류가 맞아야 빨라집니다: 나무엔 도끼, 돌과 광석엔 곡괭이.<br><b>삽</b>을 들고 땅을 누른 채 끌면 길이 다져져요. 길 위에서는 조금 더 빨리 걷고, 지도에도 보입니다.<br>풀밭의 <b>동물</b>은 마우스로 가리키고 누르면 때립니다. <b>검</b>이 가장 세요. <b>울타리</b>는 동물도 나도 넘지 못하고, <b>울타리 문</b>은 나만 여닫을 수 있어요.<br>마우스로 가리킨 것의 이름은 화면 <b>오른쪽 아래</b>에 나옵니다.</div>
         </div>
       </div>
       <div id="join" class="hidden"><div class="shade"></div>
@@ -428,7 +429,8 @@ export class UI {
     let x = '';
     if (it.food) x += `<div class="tx ok">포만감 +${it.food}</div>`;
     if (it.fuel) x += `<div class="tx">연료 ${it.fuel}초</div>`;
-    if (it.tool) x += `<div class="tx">${['', '나무', '돌', '철'][it.tier]} 등급 도구</div>`;
+    if (it.tool) x += `<div class="tx">${['', '나무', '돌', '철'][it.tier]} 등급 ${it.tool === 'sword' ? '무기' : '도구'}</div>`;
+    if (it.tool === 'sword') x += `<div class="tx ok">공격력 ${SWORD_DMG[it.tier]}</div>`;
     if (it.roof) x += '<div class="tx">들고 있으면 지붕이 비쳐 보여요.<br>빈 곳 클릭: 덮기 · 지붕 클릭: 걷어 내기 (끌어서 연속)</div>';
     if (it.place || it.seed) x += `<div class="tx">단축바에서 고르고 클릭하면 ${it.seed ? '심을' : '놓을'} 수 있어요</div>`;
     return `<div class="tn">${it.name}</div><div class="td">${it.desc}</div>${x}`;
@@ -782,11 +784,15 @@ export class UI {
   }
 
   // ── 매 프레임 ──
-  // 지금 가리키는 것(캐거나 쓰게 될 대상)의 이름과 그림: 떨어진 아이템 → 지붕 → 오브젝트 → 땅
+  // 지금 가리키는 것(캐거나 때리거나 쓰게 될 대상)의 이름과 그림: 동물 → 지붕 → 떨어진 아이템 → 오브젝트 → 땅
   hoverInfo() {
     const g = this.game, c = g.cursor, w = g.world, L = g.layer, A = this.atlas;
     if (this.blocking || g.fade || !c || !w.inb(c.x, c.y)) return null;
     const far = !c.inReach;
+    if (g.mobT) {                                        // 동물: 다쳤으면 남은 체력도
+      const m = g.mobT.m, d = MOBS[m.k];
+      return { key: `m${m.id}:${m.hp}`, name: d.name, sub: m.hp < d.hp ? `체력 ${Math.max(0, m.hp)}/${d.hp}` : '', spr: A.get(`mob_${m.k}_r_0`), far: !g.mobT.inReach };
+    }
     if (c.roof && w.roof(L, c.x, c.y)) return { key: 'roof', name: ITEMS.roof.name, spr: A.get('i_roof'), far };
     if (!(g.kbUntil > performance.now())) {             // 키보드로 겨냥하는 중이 아니면 마우스 아래 아이템부터
       const m = g.input.mouse, pt = this.renderer.screenToWorld(m.x, m.y);

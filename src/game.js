@@ -2,20 +2,24 @@
 import { TILE, MAP_W, MAP_H, SURFACE, CAVE, DAY_LENGTH, REACH, INV_SIZE, HOTBAR, WALL_LIFT, ROOF_LIFT } from './config.js';
 import { G, GROUND } from './data/ground.js';
 import { O, OBJ, SAPLING_TREES } from './data/objects.js';
-import { ITEMS, TOOL_SPEED, SHOVEL_COOL, SMELT } from './data/items.js';
+import { ITEMS, TOOL_SPEED, SHOVEL_COOL, SMELT, attackDamage } from './data/items.js';
+import { MOBS } from './data/mobs.js';
 import { World } from './world/world.js';
 import { generate } from './world/gen.js';
 import { Inventory, maxStack } from './inventory.js';
 import { checkQuests } from './quests.js';
 import { saveGame, restoreWorld, saveProfile, newId } from './save.js';
 import { Net } from './net.js';
+import { Mobs } from './mobs.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 const DIRS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
+const ATTACK_REACH = 2.5 * TILE;   // 동물을 때릴 수 있는 거리
+const EVENING = DAY_LENGTH * (13 / 24);   // 저녁 7시 (하루는 아침 6시에 시작한다)
 const USE_TEXT = {
   workbench: '제작대 사용', furnace: '화로 열기', chest: '상자 열기', cave: '동굴로 들어가기',
-  ladder: '지상으로 올라가기', door: '문 여닫기', bed: '잠자기', flag: '깃발 색 바꾸기',
+  ladder: '지상으로 올라가기', door: '문 여닫기', bed: '잠자기', flag: '깃발 색 바꾸기', gate: '울타리 문 여닫기',
 };
 // 지붕은 타일 오브젝트가 아니라 별도 층이라, 캘 때 쓰는 정의를 따로 둔다
 const ROOF_DEF = { name: '지붕', canBreak: true, wall: false, tool: 'axe', tier: 0, hard: 0.7, mat: 'wood', pcol: [0xa8503a, 0xc4664a, 0x86392c] };
@@ -28,6 +32,7 @@ export class Game {
     this.paused = false;
     this.world = null;
     this.onDisconnected = () => {};   // 방장과 연결이 끊겼을 때 (main.js가 채운다)
+    this.mobs = new Mobs(this);
     this.reset();
     this.net = new Net(this);
   }
@@ -41,6 +46,9 @@ export class Game {
     this.hotbar = 0;
     this.drops = [];
     this.dropSeq = 1;
+    this.mobs.clear();
+    this.mobT = null;           // 가리키고 있는 동물 { m, inReach }
+    this.atkCool = 0;
     this.particles = [];
     this.mining = null;
     this.shake = null;
@@ -67,6 +75,7 @@ export class Game {
     this.world.id = newId();
     const s = this.world.spawn;
     this.player.x = s.x * TILE + 8; this.player.y = s.y * TILE + 10;
+    this.mobs.populate();
     this.hook();
   }
   loadFrom(d) {
@@ -77,6 +86,7 @@ export class Game {
     d.inv.forEach((s, i) => { this.inv.slots[i] = s && ITEMS[s.id] ? { id: s.id, n: s.n } : null; });
     this.stats = { got: {}, crafted: {}, placed: {}, smelted: {}, flags: {}, ...d.stats };
     this.drops = (d.drops || []).filter((x) => ITEMS[x.id]).map((x) => ({ vx: 0, vy: 0, z: 0, vz: 0, t: 1, age: 0, ...x, uid: this.dropSeq++ }));
+    if (Array.isArray(d.mobs)) this.mobs.load(d.mobs); else this.mobs.populate();   // 동물이 생기기 전의 세이브에는 새로 뿌려 준다
     this.hook();
   }
   // 손님: 방장에게서 받은 세계에 들어간다. 가방·진행도는 내 브라우저에 저장해 둔 것을 쓴다
@@ -157,9 +167,10 @@ export class Game {
     if (this.saveAcc > 90) { this.saveAcc = 0; this.save(); }
   }
 
-  // 세계가 흘러가는 부분: 시간은 모두, 성장·화로는 세계의 주인(혼자 할 때의 나 / 방장)만 계산한다
+  // 세계가 흘러가는 부분: 시간은 모두, 성장·화로·동물은 세계의 주인(혼자 할 때의 나 / 방장)만 계산한다
   simulate(dt) {
     this.time += dt;
+    this.mobs.update(dt);
     if (this.net.isHost) {
       this.simAcc += dt;
       while (this.simAcc >= 1) { this.simAcc -= 1; this.tickGrowth(1); }
@@ -191,7 +202,9 @@ export class Game {
     }
     p.moving = !!(mx || my);
     if (p.moving) {
-      const len = Math.hypot(mx, my), sp = (p.hunger <= 0 ? 46 : 72) * dt;
+      // 다진 길 위에서는 조금 더 빨리 걷는다
+      const fast = GROUND[this.world.ground(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))].speed || 1;
+      const len = Math.hypot(mx, my), sp = (p.hunger <= 0 ? 46 : 72) * fast * dt;
       const dx = (mx / len) * sp, dy = (my / len) * sp;
       if (this.collides(p.x, p.y)) { p.x += dx; p.y += dy; }   // 끼었을 때는 빠져나올 수 있게
       else {
@@ -201,8 +214,8 @@ export class Game {
       }
       p.x = Math.max(6, Math.min(MAP_W * TILE - 6, p.x)); p.y = Math.max(8, Math.min(MAP_H * TILE - 4, p.y));
       if (!(this.mining || p.swing > 0)) p.dir = Math.abs(mx) >= Math.abs(my) && mx ? (mx > 0 ? 'r' : 'l') : my > 0 ? 'd' : 'u';
-      p.anim += dt * 8;
-      p.stepT -= dt;
+      p.anim += dt * 8 * fast;
+      p.stepT -= dt * fast;
       if (p.stepT <= 0) {
         p.stepT = 0.3;
         const g = GROUND[this.world.ground(this.layer, Math.floor(p.x / TILE), Math.floor(p.y / TILE))];
@@ -302,6 +315,7 @@ export class Game {
   updateActions(dt) {
     const inp = this.input, m = inp.mouse;
     this.cool = Math.max(0, this.cool - dt);
+    this.atkCool = Math.max(0, this.atkCool - dt);
     const blocked = this.ui.blocking || !!this.fade;
     if (!blocked) {
       let hb = this.hotbar;
@@ -311,11 +325,12 @@ export class Game {
       if (inp.hit('KeyQ')) this.dropHeld();
     }
     const kb = inp.down('Space') || inp.hit('KeyF');
-    if (kb) { this.target = this.targetDirect = this.roofT = this.facingTarget(); this.kbUntil = performance.now() + 600; }
+    if (kb) { this.target = this.targetDirect = this.roofT = this.facingTarget(); this.kbUntil = performance.now() + 600; this.aimKb = true; }
     else if (!(this.kbUntil > performance.now()) || m.moved > this.kbUntil - 600) {
       const mt = this.mouseTargets();
-      this.target = mt.smart; this.targetDirect = mt.direct; this.roofT = mt.roof;
+      this.target = mt.smart; this.targetDirect = mt.direct; this.roofT = mt.roof; this.aimKb = false;
     }
+    this.mobT = this.findMob();
     // 빈 칸에 쓰는 물건(설치물·씨앗·괭이·삽)을 들었으면 마우스 아래 칸을 그대로 겨냥한다
     {
       const held = this.heldDef(), d = this.targetDirect, rt = this.roofT;
@@ -330,7 +345,7 @@ export class Game {
     if (cand.inReach || this.reach(cand.x, cand.y)) {
       const o = this.world.obj(this.layer, cand.x, cand.y), def = OBJ[o], mt = this.world.meta(this.layer, cand.x, cand.y);
       if (def.use === 'harvest') { if (mt) this.prompt = `${def.harvest.item === 'apple' ? '사과' : '열매'} 따기`; }
-      else if (def.use) this.prompt = USE_TEXT[def.use];
+      else if (def.use) this.prompt = def.nap && this.napTime ? '낮잠 자기' : USE_TEXT[def.use];
       else if (def.crop && mt >= 3) this.prompt = '수확하기';
     }
     if (blocked) { this.mining = null; return; }
@@ -342,6 +357,8 @@ export class Game {
 
   doPrimary(dt, hit) {
     const held = this.heldDef(), w = this.world, L = this.layer;
+    // 동물을 가리키고 있으면 캐거나 놓는 대신 때린다
+    if (this.mobT) { this.mining = null; if (this.mobT.inReach) this.attack(this.mobT.m); return; }
     const t = this.cursor;
     if (!t.inReach) { this.mining = null; if (hit && held && held.food) this.eat(); return; }
     if (t.roof) return this.roofEdit ? this.roofPaint(t, hit) : this.mine(t, ROOF_DEF, dt, hit, () => this.removeRoof(t.x, t.y));
@@ -362,6 +379,32 @@ export class Game {
     else if (held && held.food && hit) this.eat();
   }
 
+  // ── 동물 ──
+  // 마우스 아래(키보드로 겨냥 중이면 바라보는 쪽)의 동물
+  findMob() {
+    if (this.layer !== SURFACE || this.roofEdit || !this.mobs.list.length) return null;
+    const p = this.player;
+    let pt;
+    if (this.aimKb) { const d = DIRS[p.dir]; pt = { x: p.x + d[0] * 14, y: p.y - 5 + d[1] * 13 }; }
+    else { const mo = this.input.mouse; pt = this.renderer.screenToWorld(mo.x, mo.y); }
+    const m = this.mobs.pick(pt.x, pt.y);
+    if (!m || this.roofBlocks(Math.floor(m.rx / TILE), Math.floor(m.ry / TILE))) return null;   // 지붕 아래에 가려진 동물
+    const d = MOBS[m.k];
+    return { m, inReach: Math.hypot(m.rx - p.x, m.ry - d.h / 2 - (p.y - 6)) - d.hw <= ATTACK_REACH };
+  }
+  // 때리기: 검이 가장 세고, 누르고 있으면 일정한 간격으로 이어서 때린다
+  attack(m) {
+    if (this.atkCool > 0) return;
+    const held = this.heldSlot(), def = held ? ITEMS[held.id] : null, p = this.player;
+    this.atkCool = def && def.tool === 'sword' ? 0.34 : 0.44;
+    p.swing = 0.22;
+    const dx = m.rx - p.x, dy = m.ry - MOBS[m.k].h / 2 - (p.y - 6);
+    p.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'r' : 'l') : dy > 0 ? 'd' : 'u';
+    this.audio.play('swing');
+    this.mobs.strike(m, attackDamage(held ? held.id : ''));
+    p.hunger = Math.max(0, p.hunger - 0.15);
+  }
+
   doSecondary() {
     const t = this.target, held = this.heldDef(), w = this.world, L = this.layer;
     if (t.inReach) {
@@ -373,10 +416,11 @@ export class Game {
         case 'chest': return this.openEnt(L, i, 'chest');
         case 'cave': return this.travel(CAVE, t.x, t.y);
         case 'ladder': return this.travel(SURFACE, t.x, t.y);
-        case 'bed': return this.sleep();
+        case 'bed': return this.sleep(def);
         case 'flag': return this.ui.open('flag', { x: t.x, y: t.y, l: L });
-        case 'door': {
-          if (m === 1 && this.playerOverlaps(t.x, t.y)) return;
+        case 'door': case 'gate': {
+          // 열린 문 사이에 내가 서 있거나 동물이 끼어 있으면 닫히지 않는다
+          if (m === 1 && (this.playerOverlaps(t.x, t.y) || this.mobs.overlapsTile(L, t.x, t.y))) return;
           w.setMeta(L, t.x, t.y, m ? 0 : 1); this.audio.play('door');
           return;
         }
@@ -543,6 +587,7 @@ export class Game {
       if (pl.on === 'soil' && !gd.soil) return fail('풀밭이나 흙에만 심을 수 있어요');
       if (pl.on === 'sand' && g !== G.SAND) return fail('모래에만 심을 수 있어요');
       if (od.solid && this.playerOverlaps(x, y)) return fail('너무 가까워요. 한 칸 떨어져서 놓으세요');
+      if (od.solid && this.mobs.overlapsTile(L, x, y)) return fail('동물이 있어서 놓을 수 없어요');
       w.setObj(L, x, y, pl.obj, pl.meta || 0);
       if (pl.obj === O.CHEST) this.ensureEnt(L, i, 'chest');
       if (pl.obj === O.FURNACE) this.ensureEnt(L, i, 'furnace');
@@ -611,17 +656,23 @@ export class Game {
       this.ui.banner(to === CAVE ? '지하 동굴' : '지상');
     });
   }
-  sleep() {
-    const h = this.hour;
-    if (this.net.isGuest) { this.ui.toast('여럿이 할 때는 방장만 밤을 넘길 수 있어요'); return; }
-    if (!(h >= 19 || h < 5)) { this.ui.toast('아직 졸리지 않아요. 저녁 7시 이후에 잘 수 있어요'); return; }
+  // 양모 침대에서 낮잠을 잘 수 있는 시간인가 (새벽 5시 ~ 저녁 7시)
+  get napTime() { const h = this.hour; return h >= 5 && h < 19; }
+  // 침대: 밤에 자면 다음 날 아침까지. 양모 침대(def.nap)는 낮에도 누울 수 있는데, 그때는 그날 저녁까지만 잔다
+  sleep(def) {
+    const wool = !!(def && def.nap), nap = wool && this.napTime;
+    if (this.net.isGuest) { this.ui.toast('여럿이 할 때는 방장만 시간을 넘길 수 있어요'); return; }
+    if (!nap && this.napTime) { this.ui.toast('아직 졸리지 않아요. 저녁 7시 이후에 잘 수 있어요'); return; }
     this.audio.play('sleep');
     this.fadeTo(() => {
-      const remain = DAY_LENGTH - (this.time % DAY_LENGTH);
+      const now = this.time % DAY_LENGTH;
+      let remain = (nap ? EVENING : DAY_LENGTH) - now;
+      if (remain <= 0) remain += DAY_LENGTH;         // 새벽 5~6시의 낮잠은 날이 바뀐 뒤의 저녁까지
       this.time += remain;
       for (let s = 0; s < remain; s += 20) this.tickGrowth(20);
-      this.player.hunger = Math.max(8, this.player.hunger - 10);
-      this.ui.banner(`${this.day}일차 아침`);
+      // 양모 침대에서 일어나면 배가 든든하다
+      this.player.hunger = wool ? 100 : Math.max(8, this.player.hunger - 10);
+      this.ui.banner(`${this.day}일차 ${nap ? '저녁' : '아침'}`);
       this.net.all({ t: 'tm', time: this.time });
       this.save();
     }, 0.8);
@@ -738,7 +789,7 @@ export class Game {
           if (m < 3) { w.setMeta(l, x, y, m + 1); if (m + 1 < 3) gm.set(i, rand(def.grow[0], def.grow[1])); else gm.delete(i); }
           else gm.delete(i);
         } else if (o === O.SAPLING) {
-          if (l === this.layer && this.playerOverlaps(x, y)) { gm.set(i, 5); continue; }
+          if ((l === this.layer && this.playerOverlaps(x, y)) || this.mobs.overlapsTile(l, x, y)) { gm.set(i, 5); continue; }
           const tree = SAPLING_TREES[Lr.meta[i]] || O.TREE_OAK;
           w.setObj(l, x, y, tree, 0);
           if (OBJ[tree].harvest) gm.set(i, rand(OBJ[tree].harvest.regrow[0], OBJ[tree].harvest.regrow[1])); else gm.delete(i);

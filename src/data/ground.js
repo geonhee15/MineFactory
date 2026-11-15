@@ -20,5 +20,5 @@ def(G.FARM, { name: '경작지', spr: 'g_farm', n: 2, prio: 20, color: 0x6e4a2e,
 def(G.CAVE, { name: '동굴 바닥', spr: 'g_cave', n: 4, prio: 45, color: 0x4d4654, step: 'stone' });
 def(G.PLANK, { name: '나무 바닥', spr: 'g_plank', n: 2, prio: 99, edge: false, color: 0xb8894f, step: 'wood' });
 def(G.GRAVEL, { name: '자갈', spr: 'g_gravel', n: 3, prio: 35, color: 0x6a6470, step: 'stone', pave: true });
-// 삽으로 다진 길. 풀밭보다 낮아서 풀이 가장자리를 살짝 덮는다
-def(G.PATH, { name: '길', spr: 'g_path', n: 3, prio: 42, color: 0xc7a878, step: 'dirt' });
+// 삽으로 다진 길. 풀밭보다 낮아서 풀이 가장자리를 살짝 덮는다. speed: 그 위에서의 걸음 속도 배수
+def(G.PATH, { name: '길', spr: 'g_path', n: 3, prio: 42, color: 0xc7a878, step: 'dirt', speed: 1.2 });

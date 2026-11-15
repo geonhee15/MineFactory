@@ -223,13 +223,14 @@ export class AudioSys {
   }
 
   // ── 효과음 ──
-  play(name) {
+  // k: 소리 크기 배수 (멀리서 나는 소리는 작게)
+  play(name, k = 1) {
     if (!this.ready || this.ctx.state !== 'running') return;
     const cave = this.scene === 'cave';
     const S = cave ? 0.28 : 0.04, E = cave ? 0.16 : 0;   // 동굴에서는 소리가 울린다
     const p = rnd(0.92, 1.08);
-    const T = (o) => this.tone({ send: S, echo: E, ...o });
-    const N = (o) => this.noise({ send: S, echo: E, ...o });
+    const T = (o) => this.tone({ send: S, echo: E, ...o, vol: (o.vol ?? 0.2) * k });
+    const N = (o) => this.noise({ send: S, echo: E, ...o, vol: (o.vol ?? 0.2) * k });
     switch (name) {
       case 'hit_wood':
         N({ f: 430 * p, q: 1.3, dur: 0.09, vol: 0.5 }); T({ type: 'triangle', f: 160 * p, f2: 92, dur: 0.11, vol: 0.5 }); T({ type: 'square', f: 320 * p, f2: 210, dur: 0.035, vol: 0.06 }); break;
@@ -273,6 +274,14 @@ export class AudioSys {
         break;
       case 'till': N({ f: 720 * p, f2: 300, q: 0.8, dur: 0.17, vol: 0.4 }); T({ type: 'triangle', f: 140, f2: 80, dur: 0.1, vol: 0.25 }); break;
       case 'shovel': N({ type: 'lowpass', f: 560 * p, f2: 210, dur: 0.12, vol: 0.4 }); T({ type: 'triangle', f: 118, f2: 68, dur: 0.1, vol: 0.3 }); N({ f: 1700 * p, q: 1.2, dur: 0.04, vol: 0.1, t: 0.03 }); break;
+      // 사냥과 동물 울음소리
+      case 'swing': N({ f: 900 * p, f2: 2600, q: 0.9, dur: 0.11, vol: 0.16 }); break;
+      case 'hit_mob': N({ type: 'lowpass', f: 900 * p, f2: 240, dur: 0.1, vol: 0.5 }); T({ type: 'triangle', f: 190 * p, f2: 90, dur: 0.1, vol: 0.4 }); break;
+      case 'mob_die': N({ f: 1400, f2: 500, q: 0.6, dur: 0.22, vol: 0.3 }); T({ f: 420 * p, f2: 160, dur: 0.2, vol: 0.16 }); break;
+      case 'moo': T({ type: 'sawtooth', f: 132 * p, f2: 150 * p, dur: 0.22, vol: 0.2, attack: 0.07, lp: 700 }); T({ type: 'sawtooth', f: 150 * p, f2: 112 * p, dur: 0.62, vol: 0.22, attack: 0.03, lp: 760, t: 0.2 }); T({ type: 'triangle', f: 300 * p, f2: 224 * p, dur: 0.6, vol: 0.05, t: 0.2 }); break;
+      case 'oink': [0, 0.14].forEach((t, i) => { T({ type: 'sawtooth', f: (290 - i * 50) * p, f2: 200 * p, dur: 0.1, vol: 0.14, lp: 1300, t }); N({ f: 650, q: 2.4, dur: 0.09, vol: 0.14, t }); }); break;
+      case 'baa': for (let i = 0; i < 6; i++) T({ type: 'sawtooth', f: (440 + (i % 2 ? 22 : -22)) * p, f2: (425 - i * 6) * p, dur: 0.095, vol: 0.12 - i * 0.01, attack: 0.012, lp: 1900, t: i * 0.08 }); break;
+      case 'cluck': [0, 0.1, 0.22].forEach((t, i) => T({ type: 'square', f: (i === 2 ? 980 : 740) * p, f2: (i === 2 ? 640 : 560) * p, dur: 0.055, vol: 0.07, lp: 2600, t })); break;
       case 'plant': T({ f: 500 * p, f2: 760, dur: 0.07, vol: 0.14 }); N({ type: 'lowpass', f: 600, dur: 0.05, vol: 0.16 }); break;
       case 'pluck': T({ f: 900 * p, f2: 1400, dur: 0.05, vol: 0.14 }); N({ f: 2500, q: 0.8, dur: 0.07, vol: 0.15 }); break;
       case 'deny': this.tone({ type: 'square', f: 185, dur: 0.07, vol: 0.07 }); this.tone({ type: 'square', f: 140, dur: 0.1, vol: 0.07, t: 0.08 }); break;

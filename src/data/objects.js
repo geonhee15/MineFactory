@@ -6,7 +6,7 @@ export const O = {
   ROCK: 20, ANDESITE: 21, GRANITE: 22, COAL_ORE: 23, IRON_ORE: 24, COPPER_ORE: 25, GOLD_ORE: 26, BEDROCK: 27,
   STALAGMITE: 28, GLOWSHROOM: 29, CRYSTAL: 30,
   WORKBENCH: 31, FURNACE: 32, CHEST: 33, TORCH: 34, WOOD_WALL: 35, STONE_BRICK: 36, DOOR: 37, BED: 38,
-  SAPLING: 39, WHEAT: 40, CARROT: 41, FLAG: 42,
+  SAPLING: 39, WHEAT: 40, CARROT: 41, FLAG: 42, FENCE: 43, GATE: 44, WOOL_BED: 45,
 };
 
 // 재질별 파티클 색
@@ -84,6 +84,12 @@ def(O.WOOD_WALL, { name: '나무 벽', solid: true, wall: true, spr: 'w_wood', t
 def(O.STONE_BRICK, { name: '돌 벽돌', solid: true, wall: true, spr: 'w_brick', tool: 'pick', tier: 1, hard: 3.5, drops: [['stone_brick', 1, 1]], mat: 'stone', pcol: PC.stone, map: 0x9aa0aa });
 def(O.DOOR, { name: '문', solid: true, spr: 'o_door', byMeta: 2, tool: 'axe', hard: 1.2, drops: [['door', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'door', map: 0x7a5536 });
 def(O.BED, { name: '침대', solid: true, spr: 'o_bed', tool: 'axe', hard: 1.2, drops: [['bed', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'bed', map: 0xd9583b });
+// 양모 침대(nap): 일어나면 포만감이 가득 차고, 낮에는 저녁까지 낮잠을 잘 수 있다
+def(O.WOOL_BED, { name: '양모 침대', solid: true, spr: 'o_woolbed', tool: 'axe', hard: 1.2, drops: [['wool_bed', 1, 1]], mat: 'wood', pcol: [0xf3ead2, 0xd9cba6, 0xc49a5c], use: 'bed', nap: true, map: 0xf3ead2 });
+// 울타리(connect): 이웃한 울타리 · 울타리 문 · 벽 쪽으로 가로대가 이어진다. 사람도 동물도 넘지 못한다
+def(O.FENCE, { name: '울타리', solid: true, spr: 'o_fence', connect: true, tool: 'axe', hard: 0.9, drops: [['fence', 1, 1]], mat: 'wood', pcol: PC.wood, map: 0x96693a });
+// 울타리 문(gate): meta 0 닫힘 / 1 열림. 사람만 여닫을 수 있고, 울타리가 이어진 방향에 맞춰 그려진다
+def(O.GATE, { name: '울타리 문', solid: true, spr: 'o_gate', gate: true, tool: 'axe', hard: 0.9, drops: [['fence_gate', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'gate', map: 0xcfa468 });
 
 // ── 자라는 것들 ─────────────────────────────────────────────
 export const SAPLING_ITEMS = ['sapling_oak', 'sapling_pine', 'sapling_birch', 'sapling_apple'];
@@ -106,3 +112,5 @@ export const FLAG_COLORS = [
 def(O.FLAG, { name: '깃발', spr: 'o_flag', byMeta: FLAG_COLORS.length, frames: 3, tall: true, hard: 0.3, drops: [['flag', 1, 1]], mat: 'wood', pcol: PC.wood, use: 'flag' });
 
 export const isWall = (o) => OBJ[o].wall;
+// 울타리가 이어 붙는 이웃인가
+export const joins = (o) => o === O.FENCE || o === O.GATE || OBJ[o].wall;

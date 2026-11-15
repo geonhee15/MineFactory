@@ -164,6 +164,25 @@ const SHOVEL = [
   '................',
   '................',
 ];
+// 검도 외곽선 없이 그리고 outline()으로 두른다 (m 날 · M 날의 그늘 · g 코등이 · w 손잡이)
+const SWORD = [
+  '................',
+  '..............m.',
+  '.............mm.',
+  '............mmM.',
+  '...........mmM..',
+  '..........mmM...',
+  '.........mmM....',
+  '........mmM.....',
+  '...g...mmM......',
+  '...gg.mmM.......',
+  '....ggmM........',
+  '.....ggg........',
+  '....w.ggg.......',
+  '...w....g.......',
+  '..W.............',
+  '................',
+];
 const HEADS = { wood: [0xcfa468, 0x96693a], stone: [0xb9bec8, 0x70757f], iron: [0xeef2f7, 0xa4adbd] };
 
 const LOG = [
@@ -378,6 +397,75 @@ export function buildItemSprites(atlas, { texs }) {
     I('bed', p.outline(K));
   }
 
+  { // 양모 침대
+    const p = new Pix(16, 16), g = P.plank;
+    p.rect(1, 5, 2, 9, g.d); p.rect(1, 5, 1, 9, g.l);
+    p.rect(3, 10, 12, 2, g.b); p.rect(13, 12, 2, 2, g.d); p.rect(3, 12, 2, 2, g.d);
+    p.rect(3, 8, 12, 2, 0xf2efe6); p.rect(3, 7, 4, 2, 0xffffff); p.rect(8, 7, 7, 3, 0xf3ead2); p.rect(8, 7, 2, 3, 0x7fb2de);
+    p.set(11, 7, 0xffffff); p.set(13, 8, 0xffffff); p.set(12, 9, 0xd9cba6); p.set(14, 9, 0xd9cba6);
+    I('wool_bed', p.outline(K));
+  }
+  I('fence', fit(fromAtlas(atlas, 'o_fence_10')));
+  I('fence_gate', fit(fromAtlas(atlas, 'o_gate_h_0')));
+
+  // 동물에게서 얻는 것
+  { // 소고기: 마블링이 있는 붉은 살
+    const p = new Pix(16, 16), g = { hi: 0xf08a7a, l: 0xd9534a, b: 0xc03a3a, d: 0x94282f };
+    shadeBlob(p, 7.5, 8.5, 5.8, 4.2, g);
+    p.line(4, 9, 7, 6, 0xf6e6d8); p.line(8, 11, 11, 8, 0xf6e6d8); p.set(6, 11, 0xf6e6d8);
+    p.rect(11, 5, 2, 2, 0xf6efe0); p.set(12, 6, 0xd8cdb8);
+    I('beef', p.outline(K));
+  }
+  { // 돼지고기: 비계가 둘린 분홍 살
+    const p = new Pix(16, 16), g = { hi: 0xffc6c6, l: 0xf59aa0, b: 0xe57a86, d: 0xbd5a6c };
+    shadeBlob(p, 7.5, 8.5, 5.8, 3.9, g);
+    for (let x = 3; x <= 12; x++) { const y = x < 5 || x > 10 ? 6 : 5; p.set(x, y, 0xfff3ea); }
+    p.set(2, 7, 0xfff3ea); p.set(13, 7, 0xfff3ea); p.line(5, 10, 9, 9, 0xfbd0d0);
+    I('pork', p.outline(K));
+  }
+  { // 양고기: 뼈가 붙은 갈비 한 대
+    const p = new Pix(16, 16), g = { hi: 0xd98a6a, l: 0xb8603f, b: 0x9a4a34, d: 0x733428 };
+    p.line(6, 10, 2, 14, 0xf6efe0); p.line(7, 10, 3, 14, 0xd8cdb8); p.set(2, 13, 0xf6efe0); p.set(3, 15, 0xf6efe0);
+    shadeBlob(p, 9.5, 6.5, 4.4, 4, g);
+    p.set(8, 5, 0xf6e6d8); p.set(9, 4, 0xf6e6d8); p.set(11, 8, 0xf6e6d8);
+    I('mutton', p.outline(K));
+  }
+  { // 닭고기: 뽀얀 닭다리
+    const p = new Pix(16, 16), g = { hi: 0xfff0e2, l: 0xf8d3ba, b: 0xeab293, d: 0xc98a6c };
+    p.line(6, 10, 3, 13, 0xf6efe0); p.line(7, 11, 4, 14, 0xd8cdb8); p.set(2, 13, 0xf6efe0); p.set(4, 15, 0xf6efe0);
+    shadeBlob(p, 10, 6.5, 3.8, 4.4, g); shadeBlob(p, 8, 9, 2.4, 2.2, g);
+    I('chicken', p.outline(K));
+  }
+  { // 가죽
+    const p = new Pix(16, 16), l = 0xb8793f, b = 0x9c6234, d = 0x7a4a26;
+    p.rect(4, 3, 8, 10, b);
+    for (const [x, y] of [[2, 2], [11, 2], [2, 11], [11, 11]]) p.rect(x, y, 3, 3, b);
+    p.rect(5, 2, 6, 1, b); p.rect(3, 6, 1, 4, b); p.rect(12, 6, 1, 4, b);
+    p.rect(5, 4, 5, 3, l); p.set(5, 4, 0xd09a5c); p.rect(4, 12, 8, 1, d); p.rect(11, 5, 1, 7, d); p.set(12, 13, d); p.set(3, 13, d);
+    I('leather', p.outline(K));
+  }
+  { // 양털
+    const p = new Pix(16, 16), w = 0xf6f2e6, ws = 0xd6cfbd;
+    for (const [x, y, r] of [[5.5, 7.5, 3], [10, 7, 3], [8, 5, 3], [8, 10.5, 3], [4.5, 10.5, 2.3], [11.5, 10.5, 2.3]]) p.disc(x, y, r, w);
+    for (const [x, y] of [[6, 6], [10, 5], [8, 9], [11, 9], [5, 10], [9, 12], [12, 11], [7, 12]]) { p.set(x, y, ws); p.set(x + 1, y + 1, ws); }
+    p.set(6, 4, 0xffffff); p.set(7, 3, 0xffffff); p.set(4, 7, 0xffffff);
+    I('wool', p.outline(K));
+  }
+  { // 깃털: 비스듬히 누운 흰 깃과 회색 깃대
+    const p = new Pix(16, 16);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const dx = x - 8.5, dy = y - 7, along = (dx - dy) / 1.414, across = (dx + dy) / 1.414;
+      if ((along / 5.6) ** 2 + (across / 2.3) ** 2 <= 1) p.set(x, y, across < -0.4 ? 0xffffff : across < 0.9 ? 0xeef1f5 : 0xcfd6de);
+    }
+    p.line(2, 14, 12, 4, 0x9aa0aa); p.set(5, 9, 0xcfd6de); p.set(9, 9, 0xb9c0c9);
+    I('feather', p.outline(K));
+  }
+  { // 달걀
+    const p = new Pix(16, 16), g = { hi: 0xffffff, l: 0xfbf3e0, b: 0xf0e0c0, d: 0xd4bd94 };
+    shadeBlob(p, 7.5, 6.5, 2.9, 3.2, g); shadeBlob(p, 7.5, 9.5, 3.7, 3.7, g);
+    I('egg', p.outline(K));
+  }
+
   I('roof', blockIcon(texs.roof, 2));
   { // 깃발
     const p = new Pix(16, 16), c = 0xe2504a;
@@ -397,6 +485,7 @@ export function buildItemSprites(atlas, { texs }) {
     I(`${mat}_axe`, art(AXE, pal));
     I(`${mat}_hoe`, art(HOE, pal));
     I(`${mat}_shovel`, art(SHOVEL, pal).outline(K));
+    I(`${mat}_sword`, art(SWORD, { ...pal, g: mat === 'wood' ? 0x7a5536 : 0x5a5e68 }).outline(K));
   }
 
   buildPlayer(atlas);

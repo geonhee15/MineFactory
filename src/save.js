@@ -51,6 +51,7 @@ export function serialize(game) {
     layers: w.layers, ents: w.ents.map((m) => [...m].map(([i, e]) => [i, ent(e)])), grow: w.grow.map((m) => [...m]),
     entrances: w.entrances, spawn: w.spawn,
     drops: game.drops.map((d) => ({ id: d.id, n: d.n, x: d.x, y: d.y, layer: d.layer, age: d.age })),
+    mobs: game.mobs.serialize(),        // 동물 [종류, x, y, 체력]
   };
 }
 
