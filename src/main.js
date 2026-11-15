@@ -19,13 +19,6 @@ game.renderer = renderer;
 ui.attach(game, renderer);
 window.MF = { game, renderer, ui, audio, atlas };   // 콘솔 디버깅용
 
-// 파비콘도 도트로
-{
-  const link = document.createElement('link');
-  link.rel = 'icon'; link.href = atlas.url('i_iron_pickaxe');
-  document.head.append(link);
-}
-
 const randomSeed = () => (Math.random() * 0xffffffff) >>> 0;
 function parseSeed(str) {
   if (!str) return randomSeed();
