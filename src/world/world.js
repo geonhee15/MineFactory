@@ -27,6 +27,8 @@ export class World {
     this.signs = [new Map(), new Map()];
     this.regions = [null, null];          // 이어진 지붕 덩어리 캐시 (idx → region)
     this.belts = [new Set(), new Set()];  // 컨베이어 벨트가 놓인 타일 idx 집합
+    this.water = [new Map(), new Map()];  // 양동이로 부은 물: idx → { u: 물 아래의 원래 바닥, lv: 0 솟는 자리 / 1~ 번진 얕은 물 }
+    this.flowQ = [new Set(), new Set()];  // 물의 흐름을 다시 살필 타일 idx (water.js)
     this.oreV = 1;                        // 광맥을 만든 규칙의 버전 (gen.js ORE_VERSION)
     this.onChange = null;                 // (layer, x, y) — 미니맵 갱신용
   }
@@ -42,6 +44,7 @@ export class World {
   setGround(l, x, y, g) {
     if (!this.inb(x, y)) return;
     this.layers[l].ground[y * MAP_W + x] = g;
+    if (this.water[l].has(y * MAP_W + x)) this.flowQ[l].add(y * MAP_W + x);     // 부은 물이 있던 칸의 바닥이 바뀌면 흐름을 다시 살핀다
     if (this.onChange) this.onChange(l, x, y);
   }
   setObj(l, x, y, o, m = 0, r = 0) {
@@ -84,6 +87,7 @@ export class World {
         if (L.roof[i]) this.roofs[l].add(i);
       }
       for (const i of [...this.signs[l].keys()]) if (!L.obj[i]) this.signs[l].delete(i);   // 블록이 없는 칸의 글은 버린다
+      this.flowQ[l] = new Set(this.water[l].keys());                                        // 번지다 만 물은 이어서 번진다
     }
   }
   // 이 타일을 덮은 지붕이 속한 덩어리(상하좌우로 이어진 지붕들)

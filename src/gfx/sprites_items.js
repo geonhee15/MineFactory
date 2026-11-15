@@ -408,6 +408,17 @@ export function buildItemSprites(atlas, { texs }) {
   I('fence', fit(fromAtlas(atlas, 'o_fence_10')));
   I('fence_gate', fit(fromAtlas(atlas, 'o_gate_h_0')));
   I('sign', fit(fromAtlas(atlas, 'o_sign_1')));
+  // 양동이: 빈 것과 물이 든 것
+  const pail = (water) => {
+    const p = new Pix(16, 16), l = 0xd6dce8, b = 0xa9b2c2, d = 0x7f8898;
+    for (let y = 6; y <= 13; y++) { const k = y >= 11 ? 1 : 0; p.rect(4 + k, y, 8 - k * 2, 1, b); p.set(4 + k, y, l); p.set(11 - k, y, d); }
+    p.rect(4, 9, 8, 1, d);                                                 // 테
+    p.rect(3, 5, 10, 1, l); p.rect(4, 6, 8, 1, water ? 0x3d8ed4 : 0x646d80);   // 입구
+    if (water) { p.rect(5, 6, 3, 1, 0xc9ecff); p.set(10, 6, 0x6cb4e8); }
+    p.rect(5, 2, 6, 1, d); p.set(4, 3, d); p.set(11, 3, d); p.set(3, 4, d); p.set(12, 4, d);   // 손잡이
+    return p.outline(K);
+  };
+  I('bucket', pail(false)); I('water_bucket', pail(true));
   // 공장
   I('belt', fromAtlas(atlas, 'o_belt_r3_0').outline(K));
   I('compressor', fit(fromAtlas(atlas, 'o_compressor_0')));

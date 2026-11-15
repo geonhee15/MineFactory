@@ -63,6 +63,7 @@ export function serialize(game) {
     mobV: MOB_VERSION,                  // 동물 수 규칙의 버전
     signs: w.signs.map((m) => [...m]),  // 표지판 글 [idx, 글]
     oreV: w.oreV,                       // 광맥을 만든 규칙의 버전
+    water: w.water.map((m) => [...m].map(([i, e]) => [i, e.u, e.lv])),   // 부은 물 [idx, 원래 바닥, 깊이]
   };
 }
 
@@ -73,6 +74,7 @@ export function restoreWorld(data) {
     for (const k of ARR) if (data.layers[l][k]) w.layers[l][k].set(data.layers[l][k]);
     w.ents[l] = new Map(data.ents[l]);
     w.grow[l] = new Map(data.grow[l]);
+    w.water[l] = new Map(((data.water && data.water[l]) || []).filter((e) => Array.isArray(e)).map(([i, u, lv]) => [i, { u, lv }]));
     w.signs[l] = new Map(((data.signs && data.signs[l]) || []).filter((e) => Array.isArray(e) && typeof e[1] === 'string'));
   }
   w.entrances = data.entrances; w.spawn = data.spawn;

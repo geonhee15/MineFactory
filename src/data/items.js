@@ -85,6 +85,10 @@ item('compressor', '압축기', '연료를 태워 재료 3개를 판 하나로 �
 item('roof', '지붕', '벽과 방 위를 덮는 천장. 밖에서는 안이 보이지 않고, 문을 열거나 안에 들어가면 비쳐 보인다.', { roof: true });
 item('flag', '깃발', '세우고 색을 고르면 지도에 깃발로 표시된다. 멀리서도 화살표로 방향을 알려 준다.', { place: { obj: O.FLAG } });
 
+// ── 양동이 ── (bucket: 'empty' 빈 것 / 'water' 물이 든 것)
+item('bucket', '양동이', '물을 뜬다. 호수는 떠도 마르지 않는다.', { stack: 16, bucket: 'empty' });
+item('water_bucket', '물 양동이', '땅에 부으면 물이 솟는 자리가 생기고, 거기서 3칸까지 얕게 번진다. 솟는 자리 둘 사이의 칸은 저절로 솟는 자리가 되어, 떠도 다시 차오른다.', { stack: 1, bucket: 'water' });
+
 // ── 도구 ──
 const TIERS = [['wood', '나무', 1], ['stone', '돌', 2], ['iron', '철', 3]];
 for (const [mat, ko, tier] of TIERS) {
@@ -129,6 +133,8 @@ R('iron_axe', 1, { iron_ingot: 3, stick: 2 }, 'workbench', 'tool');
 R('iron_hoe', 1, { iron_ingot: 2, stick: 2 }, 'workbench', 'tool');
 R('iron_shovel', 1, { iron_ingot: 1, stick: 2 }, 'workbench', 'tool');
 R('iron_sword', 1, { iron_ingot: 2, stick: 1 }, 'workbench', 'tool');
+
+R('bucket', 1, { iron_ingot: 3 }, 'workbench', 'tool');
 
 R('furnace', 1, { stone: 8 }, 'workbench', 'build');
 R('chest', 1, { plank: 8 }, 'workbench', 'build');

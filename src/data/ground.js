@@ -1,7 +1,7 @@
 // 바닥(지형) 타일 정의
 export const G = {
   NONE: 0, GRASS: 1, DIRT: 2, SAND: 3, WATER: 4, DEEP: 5,
-  STONE: 6, FARM: 7, CAVE: 8, PLANK: 9, GRAVEL: 10, PATH: 11,
+  STONE: 6, FARM: 7, CAVE: 8, PLANK: 9, GRAVEL: 10, PATH: 11, SHALLOW: 12,
 };
 
 export const GROUND = [];
@@ -20,5 +20,7 @@ def(G.FARM, { name: '경작지', spr: 'g_farm', n: 2, prio: 20, color: 0x6e4a2e,
 def(G.CAVE, { name: '동굴 바닥', spr: 'g_cave', n: 4, prio: 45, color: 0x4d4654, step: 'stone' });
 def(G.PLANK, { name: '나무 바닥', spr: 'g_plank', n: 2, prio: 99, edge: false, color: 0xb8894f, step: 'wood' });
 def(G.GRAVEL, { name: '자갈', spr: 'g_gravel', n: 3, prio: 35, color: 0x6a6470, step: 'stone', pave: true });
+// 양동이로 부은 물이 번져서 생긴 얕은 물(flow). 첨벙거리며 건널 수 있지만 걸음이 느려진다. 물이 끊기면 마른다
+def(G.SHALLOW, { name: '흐르는 물', spr: 'g_shallow', n: 2, frames: 4, prio: 12, color: 0x7fc1ef, water: true, flow: true, step: 'water', speed: 0.6 });
 // 삽으로 다진 길. 풀밭보다 낮아서 풀이 가장자리를 살짝 덮는다. speed: 그 위에서의 걸음 속도 배수
 def(G.PATH, { name: '길', spr: 'g_path', n: 3, prio: 42, color: 0xc7a878, step: 'dirt', speed: 1.2 });

@@ -11,6 +11,7 @@ import { checkQuests } from './quests.js';
 import { saveGame, restoreWorld, saveProfile, newId } from './save.js';
 import { Net } from './net.js';
 import { Mobs, MOB_VERSION } from './mobs.js';
+import { Water } from './water.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b + 1));
@@ -44,6 +45,7 @@ export class Game {
     this.worldName = '';              // 지금 플레이하는 세계의 이름 (main.js가 채운다)
     this.onDisconnected = () => {};   // 방장과 연결이 끊겼을 때 (main.js가 채운다)
     this.mobs = new Mobs(this);
+    this.water = new Water(this);
     this.reset();
     this.net = new Net(this);
   }
@@ -73,6 +75,7 @@ export class Game {
     this.frameNo = 0;
     this.cool = 0;
     this.lastAct = -1;
+    this.bkWait = 0;            // 손님: 양동이를 쓰고 방장의 답을 기다리는 중 (이 시각까지)
     this.placeRot = 0;          // 방향이 있는 설치물을 놓을 방향 (들고서 R)
     this.holdOff = false;       // 누르고 있던 버튼을 뗄 때까지 캐지 않는다 (나무 판을 뗀 직후 블록까지 캐지 않게)
     this.fade = null;           // { t, dur, phase, cb }
@@ -196,6 +199,7 @@ export class Game {
       this.simAcc += dt;
       while (this.simAcc >= 1) { this.simAcc -= 1; this.tickGrowth(1); }
       this.tickFurnaces(dt);
+      this.water.update(dt);
       this.beltAcc += dt;
       if (this.beltAcc >= BELT_PULL) { this.beltAcc = 0; this.beltPull(); }
     } else if (this.net.owned && MACHINE[this.net.owned.ent.type]) {
@@ -367,7 +371,7 @@ export class Game {
     // 빈 칸에 쓰는 물건(설치물·씨앗·괭이·삽)을 들었으면 마우스 아래 칸을 그대로 겨냥한다
     {
       const held = this.heldDef(), d = this.targetDirect, rt = this.roofT;
-      const usesEmpty = held && (held.place || held.seed || held.tool === 'hoe' || held.tool === 'shovel');
+      const usesEmpty = held && (held.place || held.seed || held.tool === 'hoe' || held.tool === 'shovel' || held.bucket);
       // 지붕을 들고 있거나, 닫힌 지붕이 가리고 있으면 그 지붕 칸을 겨냥한다
       if (rt && (this.roofEdit || this.roofBlocks(rt.x, rt.y))) this.cursor = { x: rt.x, y: rt.y, inReach: rt.inReach, roof: true };
       else this.cursor = usesEmpty && d.inReach && this.world.obj(this.layer, d.x, d.y) === O.NONE ? d : this.target;
@@ -411,6 +415,7 @@ export class Game {
     this.mining = null;
     const g = w.ground(L, t.x, t.y), i = w.idx(t.x, t.y);
     if (!hit && this.lastAct === i) return;
+    if (held && held.bucket) { if (hit) this.useBucket(t, held); return; }
     // 새로 누른 클릭은 항상 바로 반응하고, 누르고 있을 때의 연속 동작만 간격을 둔다
     if (held && held.tool === 'hoe') { if (hit || this.cool <= 0) this.till(t, g, hit); }
     else if (held && held.tool === 'shovel') { if (hit || this.cool <= 0) this.pave(t, g, hit, held); }
@@ -483,6 +488,7 @@ export class Game {
         if (held.place || held.seed) return this.place(d, held, true);
         if (held.tool === 'hoe') return this.till(d, w.ground(L, d.x, d.y), true);
         if (held.tool === 'shovel') return this.pave(d, w.ground(L, d.x, d.y), true, held);
+        if (held.bucket) return this.useBucket(d, held);
       }
       else if (held && held.sign && canPlaque(o) && !w.signs[L].has(i)) return this.attachPlaque(t);
     }
@@ -526,6 +532,40 @@ export class Game {
     if (j < 0) return [e, null];
     const e2 = this.ensureEnt(L, j, 'chest');
     return j > i ? [e, e2] : [e2, e];
+  }
+
+  // ── 양동이 ── 빈 양동이로는 물을 뜨고, 물 양동이는 땅에 붓는다 (규칙은 water.js)
+  useBucket(t, it) {
+    const L = this.layer, pour = it.bucket === 'water';
+    const fail = (msg) => { this.ui.toast(msg); this.audio.play('deny'); };
+    if (pour && this.playerOverlaps(t.x, t.y)) return fail('너무 가까워요. 한 칸 떨어져서 부으세요');
+    if (pour && this.mobs.overlapsTile(L, t.x, t.y)) return fail('동물이 있어서 부을 수 없어요');
+    this.faceTo(t); this.player.swing = 0.18;
+    if (this.net.isGuest) {
+      // 물의 흐름은 방장이 계산한다: 부탁하고 답을 기다린다 (답이 오면 bucketDone)
+      const now = performance.now();
+      if (this.bkWait > now) return;
+      this.bkWait = now + 1500;
+      this.net.send({ t: 'bk', l: L, x: t.x, y: t.y, pour });
+      return;
+    }
+    const msg = pour ? this.water.pour(L, t.x, t.y) : this.water.scoop(L, t.x, t.y);
+    if (msg) return fail(msg);
+    this.bucketDone(pour, t.x, t.y);
+  }
+  // 손에 든 양동이를 바꾼다: 떴으면 물 양동이로, 부었으면 빈 양동이로
+  bucketDone(pour, x, y) {
+    const s = this.heldSlot(), kind = s ? ITEMS[s.id].bucket : null;
+    if (!kind || (kind === 'water') !== pour) return;
+    if (pour) this.inv.slots[this.hotbar] = { id: 'bucket', n: 1 };
+    else if (s.n <= 1) this.inv.slots[this.hotbar] = { id: 'water_bucket', n: 1 };
+    else {
+      s.n--;
+      if (this.inv.add('water_bucket', 1) > 0) this.spawnDrop('water_bucket', 1, this.player.x, this.player.y - 4, { t: -1 });   // 가방이 꽉 찼으면 발밑에
+    }
+    this.ui.dirty = true;
+    this.audio.play(pour ? 'pour' : 'scoop');
+    this.burst(x * TILE + 8, y * TILE + 8, [0x6cb4e8, 0xc9ecff, 0x3d8ed4], pour ? 9 : 6, 45);
   }
 
   // ── 큰 상자 ──

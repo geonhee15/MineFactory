@@ -275,6 +275,8 @@ export class AudioSys {
       case 'till': N({ f: 720 * p, f2: 300, q: 0.8, dur: 0.17, vol: 0.4 }); T({ type: 'triangle', f: 140, f2: 80, dur: 0.1, vol: 0.25 }); break;
       case 'shovel': N({ type: 'lowpass', f: 560 * p, f2: 210, dur: 0.12, vol: 0.4 }); T({ type: 'triangle', f: 118, f2: 68, dur: 0.1, vol: 0.3 }); N({ f: 1700 * p, q: 1.2, dur: 0.04, vol: 0.1, t: 0.03 }); break;
       // 사냥과 동물 울음소리
+      case 'scoop': N({ type: 'lowpass', f: 1300, f2: 420, dur: 0.16, vol: 0.34 }); T({ f: 380 * p, f2: 720, dur: 0.11, vol: 0.12, t: 0.03 }); T({ f: 900 * p, f2: 1300, dur: 0.05, vol: 0.06, t: 0.12 }); break;
+      case 'pour': N({ type: 'lowpass', f: 1900, f2: 380, dur: 0.34, vol: 0.4 }); N({ f: 3000, q: 0.8, dur: 0.12, vol: 0.12 }); T({ f: 620 * p, f2: 260, dur: 0.2, vol: 0.1 }); break;
       case 'press': T({ type: 'triangle', f: 120 * p, f2: 55, dur: 0.16, vol: 0.5 }); N({ type: 'lowpass', f: 900, f2: 200, dur: 0.12, vol: 0.4 }); N({ f: 3200, q: 1.2, dur: 0.05, vol: 0.12, t: 0.1 }); T({ type: 'square', f: 880, f2: 660, dur: 0.05, vol: 0.04, t: 0.14 }); break;
       case 'rotate': T({ type: 'triangle', f: 300 * p, f2: 210, dur: 0.05, vol: 0.3 }); N({ f: 1500, q: 1.4, dur: 0.035, vol: 0.14 }); T({ type: 'triangle', f: 380 * p, f2: 300, dur: 0.04, vol: 0.2, t: 0.06 }); break;
       case 'write': [0, 0.07, 0.15].forEach((t, i) => N({ f: (2600 + i * 500) * p, q: 2.2, dur: 0.05, vol: 0.13, t })); break;
@@ -294,6 +296,7 @@ export class AudioSys {
       case 'step_grass': this.noise({ f: 1400 * rnd(0.8, 1.2), q: 0.7, dur: 0.05, vol: rnd(0.05, 0.08) }); break;
       case 'step_sand': this.noise({ f: 900 * rnd(0.8, 1.2), q: 0.5, dur: 0.07, vol: rnd(0.05, 0.08) }); break;
       case 'step_dirt': this.noise({ type: 'lowpass', f: 700 * rnd(0.8, 1.2), dur: 0.05, vol: rnd(0.07, 0.1) }); break;
+      case 'step_water': this.noise({ type: 'lowpass', f: 1500 * rnd(0.8, 1.2), f2: 500, dur: 0.09, vol: rnd(0.09, 0.13) }); this.tone({ f: 520 * rnd(0.9, 1.2), f2: 300, dur: 0.05, vol: 0.04 }); break;
       case 'step_stone':
         N({ f: 2400 * rnd(0.85, 1.15), q: 1.5, dur: 0.03, vol: rnd(0.06, 0.09) }); T({ f: 165 * rnd(0.9, 1.1), dur: 0.03, vol: 0.05 }); break;
       case 'step_wood': this.tone({ type: 'triangle', f: 185 * rnd(0.9, 1.1), f2: 130, dur: 0.05, vol: 0.12 }); this.noise({ f: 800, dur: 0.03, vol: 0.05 }); break;

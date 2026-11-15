@@ -1024,6 +1024,8 @@ export function buildSprites() {
     if (!v && !f) { texs.g_water = w; texs.g_deep = d; }
     A(`g_water_${v}_${f}`, w); A(`g_deep_${v}_${f}`, d);
   }
+  // 부은 물이 번져 생긴 얕은 물: 바닥이 비쳐 보이듯 밝은 물빛
+  for (let v = 0; v < 2; v++) for (let f = 0; f < 4; f++) A(`g_shallow_${v}_${f}`, texWater(1301 + v * 13, f, { hi: 0xeef9ff, l: 0xb4dcf8, b: 0x7fc1ef, d: 0x62ace4 }));
   addEdges(atlas, 'g_grass', texs.g_grass, PAL.grass.dd, 11);
   addEdges(atlas, 'g_dirt', texs.g_dirt, PAL.dirt.dd, 12);
   addEdges(atlas, 'g_sand', texs.g_sand, PAL.sand.dd, 13);

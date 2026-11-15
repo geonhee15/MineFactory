@@ -17,7 +17,7 @@ import { ITEMS, attackDamage } from './data/items.js';
 import { pack, unpack, gzip, gunzip, b64enc, b64dec, restoreWorld, loadProfile } from './save.js';
 
 const N = MAP_W * MAP_H;
-const PROTO = 5;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
+const PROTO = 6;                       // 통신 규칙 버전 (다르면 접속 거절). 메시지 형식이나 타일·오브젝트 번호가 늘면 올린다
 const PREFIX = 'mf1-';
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
 export const MAX_PLAYERS = 8;
@@ -309,6 +309,14 @@ export class Net {
       case 'sx':
         if (w.layers[m.l] && Number.isInteger(m.i) && m.i >= 0 && m.i < N) g.removePlaque(m.i % MAP_W, (m.i / MAP_W) | 0, m.l, true);
         break;
+      case 'bk': {
+        // 손님이 양동이를 썼다: 물을 뜨거나 붓고, 됐는지 알려 준다 (손님은 답을 받고 양동이를 바꾼다)
+        const { l, x, y } = m;
+        if ((l !== 0 && l !== 1) || !Number.isInteger(x) || !Number.isInteger(y) || !w.inb(x, y)) break;
+        const msg = m.pour ? g.water.pour(l, x, y) : g.water.scoop(l, x, y);
+        this.to(id, { t: 'bk', ok: !msg, msg, pour: !!m.pour, x, y });
+        break;
+      }
       case 'eu': case 'ec': {
         const e = w.ents[m.l] && w.ents[m.l].get(m.i);
         if (e && e.owner === id && m.ent && Array.isArray(m.ent.slots)) {
@@ -464,6 +472,10 @@ export class Net {
         if (g.world.layers[m.l]) { if (!g.removePlaque(m.i % MAP_W, (m.i / MAP_W) | 0, m.l, true)) g.world.signs[m.l].delete(m.i); }
         break;
       case 'ex': this.pendingEnt = null; g.ui.toast(m.why === 'busy' ? '다른 플레이어가 쓰고 있어요' : '지금은 열 수 없어요'); g.audio.play('deny'); break;
+      case 'bk':
+        g.bkWait = 0;
+        if (m.ok) g.bucketDone(!!m.pour, m.x, m.y); else { g.ui.toast(String(m.msg || '지금은 할 수 없어요')); g.audio.play('deny'); }
+        break;
       case 'tm': if (Math.abs(g.time - m.time) > 0.5) g.time = m.time; break;
       case 'ms': if (Array.isArray(m.a)) g.mobs.netApply(m.a); break;
       case 'md': g.mobs.netDied(m); break;
